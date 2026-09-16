@@ -1,0 +1,290 @@
+{
+  "id": "proj6",
+  "title": "ARIES Recovery",
+  "points": 120,
+  "releaseDate": "2026-11-09",
+  "dueDate": "2026-11-25",
+  "tests": 17,
+  "overview": "In this project you will implement the **ARIES** (Algorithms for Recovery and Isolation Exploiting Semantics) recovery algorithm — the industry-standard approach to crash recovery in database systems.\n\nThe key insight behind ARIES is the **Write-Ahead Log (WAL)** protocol: every change to the database is first recorded in a sequential log file before the change is applied to the actual data pages. On crash, the system can recover to a consistent state by replaying the log.\n\nARIES recovery has three phases:\n\n1. **Analysis**: Scan the log from the last checkpoint to determine which transactions were active at crash time (Active Transaction Table) and which pages may be dirty (Dirty Page Table).\n\n2. **Redo**: Starting from the earliest dirty page's recLSN, replay all logged changes forward to bring the database to its exact pre-crash state — including uncommitted changes.\n\n3. **Undo**: Roll back all uncommitted transactions by following each transaction's `prev_lsn` chain backward, writing **Compensation Log Records (CLR)** for each undone operation. CLRs ensure that undo is idempotent — if the system crashes during recovery, re-running recovery produces the same result.\n\nYou will implement two components: the **LogManager** (WAL writing and reading) and the **RecoveryManager** (the three ARIES phases).",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Log Manager",
+      "description": "The `LogManager` writes log records to a WAL file and reads them back for recovery. Each log record is assigned a monotonically increasing **LSN** (Log Sequence Number). Records for the same transaction are linked via `prev_lsn` pointers, forming a chain that the Undo phase follows backward.\n\n**WAL Protocol:** The log for a page must be flushed to disk BEFORE the dirty page is written to disk. COMMIT records are always force-flushed immediately.\n\n**Log file format:** Each record is stored as `[4-byte length][serialized record]`.",
+      "file": "src/recovery/log_manager.cpp",
+      "functions": [
+        {
+          "name": "AppendLog(LogRecord& record) → lsn_t",
+          "description": "Assign an LSN to the record, link it to the transaction's previous record via `prev_lsn`, serialize it, and append to the in-memory log buffer. For COMMIT and CHECKPOINT records, immediately flush the buffer to disk (force-write).",
+          "hints": [
+            "Assign `record.lsn = next_lsn_++`.",
+            "Set `record.prev_lsn = last_lsn_[record.txn_id]`, then update `last_lsn_[txn_id] = record.lsn`.",
+            "Serialize with `record.Serialize()` and prepend a 4-byte length.",
+            "Append to `log_buffer_`.",
+            "If type is COMMIT or CHECKPOINT, call `FlushLog(record.lsn)`."
+          ],
+          "lines": 20
+        },
+        {
+          "name": "FlushLog(lsn_t up_to_lsn)",
+          "description": "Write the entire in-memory log buffer to the log file on disk, update `flushed_lsn_`, and clear the buffer.",
+          "hints": [
+            "Seek to end of file with `seekp(0, ios::end)`.",
+            "Write `log_buffer_` contents.",
+            "Call `flush()` for durability.",
+            "Clear `log_buffer_` and set `flushed_lsn_ = up_to_lsn`."
+          ],
+          "lines": 10
+        },
+        {
+          "name": "ReadAllLogs() → vector<LogRecord>",
+          "description": "Read the entire log file and deserialize all log records. Used during recovery to reconstruct the full log history.",
+          "hints": [
+            "Seek to end to get file size, then read entire file into a byte buffer.",
+            "Loop: read 4-byte length, then deserialize `length` bytes with `LogRecord::Deserialize()`.",
+            "Stop when end of buffer is reached."
+          ],
+          "lines": 15
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Recovery Manager — Analysis Phase",
+      "description": "The Analysis phase scans the log from the last checkpoint (or the beginning if no checkpoint exists) to reconstruct two tables:\n\n- **ATT (Active Transaction Table):** `txn_id → lastLSN` for transactions that were running at crash time. Transactions that committed or aborted are removed.\n\n- **DPT (Dirty Page Table):** `page_id → recLSN` where recLSN is the LSN of the first log record that dirtied the page. This tells the Redo phase where to start replaying for each page.",
+      "file": "src/recovery/recovery_manager.cpp",
+      "functions": [
+        {
+          "name": "Analyze(const vector<LogRecord>& logs)",
+          "description": "Scan log records and build the ATT and DPT.\n\nFor each record:\n- **BEGIN**: add `txn_id` to ATT with `lastLSN = record.lsn`\n- **COMMIT / ABORT**: remove `txn_id` from ATT\n- **UPDATE / CLR**: add/update `txn_id` in ATT; if `page_id` not in DPT, add it with `recLSN = record.lsn`\n- **CHECKPOINT**: initialize ATT and DPT from the checkpoint's stored tables, then continue scanning",
+          "hints": [
+            "Find the last CHECKPOINT by scanning backward.",
+            "Initialize ATT/DPT from checkpoint data if found.",
+            "Scan forward from checkpoint+1 (or beginning if no checkpoint).",
+            "Use `att_[txn_id] = lsn` for ATT updates.",
+            "Use `dpt_.find(page_id) == dpt_.end()` to check before adding to DPT."
+          ],
+          "lines": 40
+        },
+        {
+          "name": "Recover()",
+          "description": "Run the three ARIES phases in order: `Analyze()`, then `Redo()`, then `Undo()`.",
+          "hints": [
+            "The order is the algorithm; none of the three works out of place."
+          ],
+          "lines": 5
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Recovery Manager — Redo Phase",
+      "description": "The Redo phase replays all changes from the log to bring every page to its exact pre-crash state. It starts from the minimum `recLSN` across all entries in the DPT.\n\nFor each UPDATE or CLR record:\n1. **Skip** if the page is not in the DPT\n2. **Skip** if `record.lsn < DPT[page_id].recLSN`\n3. **Skip** if the page's current `pageLSN >= record.lsn` (already applied — this is why pages store pageLSN)\n4. Otherwise, **apply the `after_image`** to the page at the specified offset and set `pageLSN = record.lsn`\n\nThe pageLSN check (step 3) is what makes redo idempotent — it's safe to redo a record that was already applied.",
+      "file": "src/recovery/recovery_manager.cpp",
+      "functions": [
+        {
+          "name": "Redo(const vector<LogRecord>& logs)",
+          "description": "Replay logged changes for dirty pages. Apply `after_image` to each page that needs it.",
+          "hints": [
+            "Compute `min_rec_lsn = min(dpt_[*].recLSN)`.",
+            "Skip records with `lsn < min_rec_lsn`.",
+            "For each qualifying record: `FetchPage`, check `pageLSN`, apply if needed.",
+            "Use `memcpy(page->GetData() + offset, after_image, length)`.",
+            "Don't forget to `UnpinPage` with dirty=true after modification."
+          ],
+          "lines": 35
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Recovery Manager — Undo Phase",
+      "description": "The Undo phase rolls back all transactions that were active at crash time (those remaining in the ATT after Analysis). It processes log records in **reverse LSN order** using a max-heap.\n\nFor each UPDATE record being undone:\n1. Write a **CLR** (Compensation Log Record) with the `before_image` as the new `after_image` and `undo_next_lsn = record.prev_lsn`\n2. Apply the `before_image` to restore the page\n3. Push `record.prev_lsn` onto the heap to continue the chain\n\nFor CLR records: simply follow `undo_next_lsn` (the update was already undone)\n\nWhen `undo_next_lsn == INVALID_LSN` (or we reach a BEGIN record), the transaction is fully undone — write an ABORT record.\n\n**Why CLRs matter:** If the system crashes during Undo, the CLRs written so far tell the next recovery which undos were already completed, preventing double-undo.",
+      "file": "src/recovery/recovery_manager.cpp",
+      "functions": [
+        {
+          "name": "Undo(const vector<LogRecord>& logs)",
+          "description": "Roll back uncommitted transactions by traversing prev_lsn chains in reverse, writing CLRs.",
+          "hints": [
+            "Build a `map<lsn_t, index>` for O(1) record lookup by LSN.",
+            "Use `priority_queue<lsn_t>` (max-heap) initialized with `att_[*].lastLSN`.",
+            "Pop largest LSN, find the record, handle based on type.",
+            "For UPDATE: write CLR with `undo_next = prev_lsn`, apply `before_image`.",
+            "For CLR: push `undo_next_lsn` if != INVALID_LSN.",
+            "For BEGIN: write ABORT record (txn fully undone).",
+            "Clear ATT when done."
+          ],
+          "lines": 50
+        }
+      ]
+    }
+  ],
+  "testing": {
+    "buildCommands": [
+      "cmake -B build",
+      "cmake --build build"
+    ],
+    "runCommand": "ctest --test-dir build --output-on-failure",
+    "testFile": "tests/proj6_recovery_test.cpp",
+    "breakdown": [
+      {
+        "suite": "Log Basics",
+        "count": 3,
+        "covers": "Append/Read, prev_lsn chain, checkpoint serialization"
+      },
+      {
+        "suite": "Redo",
+        "count": 3,
+        "covers": "Committed txn crash recovery, partial page flush, multiple updates same page"
+      },
+      {
+        "suite": "Undo",
+        "count": 3,
+        "covers": "Uncommitted txn rollback, explicit abort, long undo chain (15 updates)"
+      },
+      {
+        "suite": "Mixed",
+        "count": 4,
+        "covers": "Commit+uncommitted, 3 interleaved txns, same page multi-txn, abort then new commit"
+      },
+      {
+        "suite": "Robustness",
+        "count": 4,
+        "covers": "Empty log, idempotent recovery, checkpoint with active txn, checkpoint between commits"
+      }
+    ],
+    "note": "Project #1 reference is provided (buffer manager must work for page access during recovery). The tests simulate crashes by destroying DiskManager/BufferManager instances and creating new ones.",
+    "localTests": 103,
+    "platforms": "macOS or Linux, on either Intel or ARM. On Windows, build inside WSL: a native Windows toolchain is refused, because the reference libraries these downloads carry are built for macOS and Linux only."
+  },
+  "hints": [
+    "Start with the LogManager — AppendLog and ReadAllLogs are independent of recovery logic and easy to test.",
+    "Implement Analysis before Redo/Undo. Print ATT and DPT after Analysis to verify they match expectations.",
+    "For Redo: the key insight is the pageLSN check. If `pageLSN >= record.lsn`, the update was already on disk — skip it.",
+    "For Undo: use a max-heap (priority_queue) to process records in reverse LSN order across all active transactions simultaneously.",
+    "CLR records have `undo_next_lsn` pointing to the NEXT record to undo (i.e., `prev_lsn` of the UPDATE being undone). This lets recovery skip already-undone records if it crashes during Undo.",
+    "Draw the log as a timeline with arrows for prev_lsn chains. Trace through Analysis/Redo/Undo by hand before coding.",
+    "The Undo phase writes new log records (CLRs and ABORTs). These are appended to the same log file, making recovery idempotent.",
+    "Read Chapter 18 of the textbook (Crash Recovery) for the full ARIES algorithm. Our implementation simplifies some aspects (no fuzzy checkpoint, no nested top actions)."
+  ],
+  "verification": {
+    "items": [
+      {
+        "kind": "invariant",
+        "name": "LogManager"
+      },
+      {
+        "kind": "invariant",
+        "name": "RecoveryManager"
+      }
+    ]
+  },
+  "submission": {
+    "archive": "<student id>_proj6.zip",
+    "where": "Upload the archive to PLMS (https://plms.postech.ac.kr) under Project #6 before the deadline. Submissions sent by email, or left anywhere else, are not collected.",
+    "files": [
+      "src/recovery/log_manager.cpp",
+      "src/recovery/recovery_manager.cpp"
+    ],
+    "extras": [
+      {
+        "name": "result.txt",
+        "description": "Output of `ctest --test-dir build --output-on-failure > result.txt 2>&1`"
+      },
+      {
+        "name": "REPORT.md",
+        "description": "Your report (see the sections below)"
+      }
+    ],
+    "note": "Keep the original directory layout inside the archive (src/…), so the files drop straight back into the project tree. Submit only the files you edited: no build/ directory, no compiled objects, no reference libraries.",
+    "report": [
+      {
+        "section": "Problem Analysis",
+        "weight": 20,
+        "description": "What each function you write has to solve, and what the code handed to you for this project does — the parts you read but did not write. The earlier projects are out of scope: they arrive as a compiled library."
+      },
+      {
+        "section": "Design",
+        "weight": 10,
+        "description": "The algorithm you chose for each function, and why that one."
+      },
+      {
+        "section": "Mapping",
+        "weight": 10,
+        "description": "Which part of the design is which part of your code, by file and line."
+      },
+      {
+        "section": "Verification",
+        "weight": 50,
+        "description": "The argument that your code is right.",
+        "parts": [
+          {
+            "weight": 25,
+            "listModules": true,
+            "blocks": [
+              {
+                "text": "**For each module below, write one expression that is always true of it** — true before any of its functions is called, and true again every time one of them returns. It may go false in the middle of a function; that is what makes it worth writing down."
+              },
+              {
+                "text": "The expression is symbols, not words:"
+              },
+              {
+                "code": [
+                  "gcd(num, den) = 1 and den > 0"
+                ]
+              },
+              {
+                "text": "If something is hard to put in symbols, define it as a variable in words, then use the variable in the expression:"
+              },
+              {
+                "code": [
+                  "P = the spaces with a car in them",
+                  "F = the spaces that are empty",
+                  "",
+                  "P union F = {0 .. total_spaces-1}",
+                  "|F| = free_count"
+                ]
+              },
+              {
+                "text": "You can use a loop:"
+              },
+              {
+                "code": [
+                  "for i in 0 .. total_spaces-1:  i in P or i in F"
+                ]
+              },
+              {
+                "text": "A module holds several such expressions true at once. Pick one and get it right; you do not have to find them all."
+              }
+            ]
+          },
+          {
+            "weight": 25,
+            "blocks": [
+              {
+                "text": "**For each function you wrote, show your expression is still true when it returns.** A line or two each, grouped by module."
+              },
+              {
+                "text": "If a function cannot affect the expression, say so in one line. If it could, say which step keeps it true."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "grading": {
+    "criteria": [
+      {
+        "item": "Report",
+        "weight": "90%",
+        "description": "Four sections, below: Problem Analysis 20, Design 10, Mapping 10, Verification 50. Its claims are checked against your code — an expression the report states and the code breaks is a failure of the report."
+      },
+      {
+        "item": "Code",
+        "weight": "10%",
+        "description": "Autograded on this project's own test suite."
+      }
+    ]
+  }
+}

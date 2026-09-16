@@ -1,0 +1,313 @@
+{
+  "id": "proj1",
+  "title": "Disk Manager & Buffer Manager",
+  "points": 100,
+  "releaseDate": "2026-09-16",
+  "dueDate": "2026-09-25",
+  "tests": 17,
+  "overview": "In this project you will implement the lowest two layers of the EduDBMS storage stack: the **Disk Manager** and the **Buffer Manager**.\n\nA disk-oriented DBMS stores data in files on persistent storage (SSD or HDD). Data is organized in fixed-size units called **pages** (4 KB each). The DBMS cannot operate on disk pages directly — it must first copy them into memory. The **Buffer Manager** acts as a cache between the execution engine and disk, keeping frequently accessed pages in a fixed-size memory pool and evicting cold pages using a replacement policy.\n\nYour implementation will handle raw page I/O, a buffer pool with pin/unpin semantics, and an LRU (Least Recently Used) eviction policy.",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Disk Manager",
+      "description": "The `DiskManager` class manages raw page-level I/O to a single database file. Each page occupies exactly `DB_PAGE_SIZE` (4096) bytes at file offset `page_id * DB_PAGE_SIZE`.",
+      "file": "src/disk/disk_manager.cpp",
+      "functions": [
+        {
+          "name": "ReadPage(page_id_t page_id, char* data)",
+          "description": "Read the contents of the specified page from disk into the `data` buffer. Seek to the correct file offset (`page_id * DB_PAGE_SIZE`) and read exactly `DB_PAGE_SIZE` bytes. If the page is beyond the current file size, zero-fill the buffer.",
+          "hints": [
+            "Use `seekg()` to position the read pointer.",
+            "Use `read()` to copy bytes into `data`.",
+            "Check `page_id >= num_pages_` for the zero-fill case."
+          ],
+          "lines": 10
+        },
+        {
+          "name": "WritePage(page_id_t page_id, const char* data)",
+          "description": "Write `DB_PAGE_SIZE` bytes from `data` to the specified page on disk. Seek to the correct offset and flush the write to ensure durability.",
+          "hints": [
+            "Use `seekp()` to position the write pointer.",
+            "Call `flush()` after writing to ensure data reaches disk.",
+            "Update `num_pages_` if writing beyond the current extent."
+          ],
+          "lines": 10
+        },
+        {
+          "name": "AllocatePage() → page_id_t",
+          "description": "Allocate a new page by returning the current `num_pages_` value and incrementing it. The actual disk space will be allocated on the first `WritePage` call.",
+          "hints": [
+            "This is a simple counter increment."
+          ],
+          "lines": 3
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "LRU Replacer",
+      "description": "The `LRUReplacer` tracks which buffer pool frames are candidates for eviction. Only unpinned frames (pin_count == 0) are tracked. When a frame is pinned, it is removed from the replacer. When unpinned, it is added to the back of an LRU list. `Victim()` evicts the least-recently-used frame from the front of the list.\n\nInternally, use a doubly-linked list (`std::list`) for O(1) removal and a hash map (`std::unordered_map`) mapping frame_id to list iterator for O(1) lookup.",
+      "file": "src/buffer/replacer.cpp",
+      "functions": [
+        {
+          "name": "Victim(frame_id_t* frame_id) → bool",
+          "description": "Remove the least-recently-used frame from the replacer. Set `*frame_id` to the evicted frame's ID. Return `true` if a victim was found, `false` if the replacer is empty.",
+          "hints": [
+            "The victim is at `lru_list_.front()`.",
+            "Remove from both `lru_list_` and `lru_map_`."
+          ],
+          "lines": 10
+        },
+        {
+          "name": "Pin(frame_id_t frame_id)",
+          "description": "Remove the given frame from the replacer, making it non-evictable. If the frame is not in the replacer, do nothing.",
+          "hints": [
+            "Check `lru_map_.find(frame_id)` first.",
+            "Erase from both map and list."
+          ],
+          "lines": 5
+        },
+        {
+          "name": "Unpin(frame_id_t frame_id)",
+          "description": "Add the given frame to the replacer, making it evictable. If the frame is already in the replacer, do nothing (do not move it).",
+          "hints": [
+            "Guard against duplicates with `lru_map_.count()`.",
+            "Use `push_back` and `std::prev(lru_list_.end())` to record the iterator."
+          ],
+          "lines": 5
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Buffer Manager",
+      "description": "The `BufferManager` manages a fixed-size pool of in-memory page frames. It loads pages from disk on demand via `FetchPage`, writes dirty pages back on eviction or explicit flush, and uses the `LRUReplacer` for eviction decisions.\n\n**Key concepts:**\n- **Frame**: a slot in the buffer pool (indexed 0 to pool_size-1)\n- **Page**: a `DB_PAGE_SIZE` block on disk (indexed by page_id)\n- **Page Table** (`page_table_`): maps page_id → frame_id for pages currently in the pool\n- **Free List** (`free_list_`): frames not yet assigned to any page\n- **Pin Count**: number of threads/operations currently using the page. A page with pin_count > 0 cannot be evicted.",
+      "file": "src/buffer/buffer_manager.cpp",
+      "functions": [
+        {
+          "name": "FetchPage(page_id_t page_id) → Page*",
+          "description": "Fetch a page into the buffer pool. If the page is already in the pool, increment its pin count and return it. Otherwise, find a free frame (from `free_list_`) or evict one via the replacer. If the evicted frame is dirty, flush it to disk first. Read the requested page from disk into the frame, update `page_table_`, and return the page with pin_count = 1.\n\nReturn `nullptr` if all frames are pinned and no eviction is possible.",
+          "hints": [
+            "Step 1: Check `page_table_` for a cache hit.",
+            "Step 2: On miss, try `free_list_` first, then `replacer_.Victim()`.",
+            "Step 3: If victim is dirty, call `disk_manager_->WritePage()`.",
+            "Step 4: Update `page_table_`, call `disk_manager_->ReadPage()`.",
+            "Step 5: Set page metadata (page_id, pin_count=1, dirty=false)."
+          ],
+          "lines": 30
+        },
+        {
+          "name": "UnpinPage(page_id_t page_id, bool is_dirty) → bool",
+          "description": "Decrease a page's pin count. If `is_dirty` is true, mark the page as dirty. When pin_count reaches 0, add the frame to the replacer (making it evictable). Return `false` if the page is not in the pool or already has pin_count 0.",
+          "hints": [
+            "Look up the frame via `page_table_`.",
+            "Decrement pin_count. If it reaches 0, call `replacer_.Unpin(frame_id)`.",
+            "Set the dirty flag with OR semantics (don't clear it if already dirty)."
+          ],
+          "lines": 15
+        },
+        {
+          "name": "FlushPage(page_id_t page_id) → bool",
+          "description": "Write a page's data to disk regardless of its dirty flag. Clear the dirty flag after writing. Return `false` if the page is not in the pool.",
+          "hints": [
+            "Call `disk_manager_->WritePage(page_id, page.GetData())`.",
+            "Set `page.SetDirty(false)` after flushing."
+          ],
+          "lines": 10
+        },
+        {
+          "name": "NewPage() → Page*",
+          "description": "Allocate a new page in both the buffer pool and on disk. Find a free frame (or evict). Then call `disk_manager_->AllocatePage()` to get a new page_id. Initialize the frame and return it with pin_count = 1.\n\n**Important:** Acquire the frame before calling `AllocatePage()` to avoid leaking page_ids if eviction fails.",
+          "hints": [
+            "Step 1: Find a frame (free_list_ or victim).",
+            "Step 2: If victim is dirty, flush it.",
+            "Step 3: Call `AllocatePage()` to get the new page_id.",
+            "Step 4: Reset frame, set page_id, pin_count=1."
+          ],
+          "lines": 25
+        },
+        {
+          "name": "FlushAllPages()",
+          "description": "Write every dirty page in the pool to disk and clear its dirty flag. Clean pages need no work.",
+          "hints": [
+            "Iterate through `page_table_`.",
+            "For each dirty page, call `disk_manager_->WritePage()` and clear the flag."
+          ],
+          "lines": 10
+        },
+        {
+          "name": "DeletePage(page_id_t page_id) → bool",
+          "description": "Remove a page from the buffer pool and hand its frame back to the free list. Return `false` if the page is still pinned; return `true` if it was removed, and also if it was never in the pool.",
+          "hints": [
+            "Look it up in `page_table_`. Not there means nothing to do — return `true`.",
+            "A `pin_count` above 0 means someone is still using it — return `false`.",
+            "Drop it from `page_table_`, reset the frame, push the frame onto `free_list_`.",
+            "Take the frame out of the replacer with `Pin()`."
+          ],
+          "lines": 15
+        }
+      ]
+    }
+  ],
+  "testing": {
+    "buildCommands": [
+      "cmake -B build",
+      "cmake --build build"
+    ],
+    "runCommand": "ctest --test-dir build --output-on-failure",
+    "testFile": "tests/proj1_disk_buffer_test.cpp",
+    "breakdown": [
+      {
+        "suite": "DiskManagerTest",
+        "count": 5,
+        "covers": "Page read/write, allocate, persistence across instances"
+      },
+      {
+        "suite": "LRUReplacerTest",
+        "count": 5,
+        "covers": "Victim selection, pin/unpin ordering, edge cases"
+      },
+      {
+        "suite": "BufferManagerTest",
+        "count": 7,
+        "covers": "Fetch, cache hit, eviction, dirty flush, all-pinned"
+      }
+    ],
+    "note": "These tests are the actual grading tests.",
+    "localTests": 17,
+    "platforms": "macOS or Linux, on either Intel or ARM. On Windows, build inside WSL: a native Windows toolchain is refused, because the reference libraries these downloads carry are built for macOS and Linux only."
+  },
+  "hints": [
+    "Start with `DiskManager` — it has no dependencies and the simplest logic.",
+    "Test `LRUReplacer` independently before integrating with `BufferManager`.",
+    "In `FetchPage`, handle the cache-hit case first (it's simpler).",
+    "Use `memset(data, 0, DB_PAGE_SIZE)` when you need to zero-fill a page.",
+    "Remember that `UnpinPage` uses OR semantics for the dirty flag: a page that was marked dirty earlier should stay dirty even if unpinned with `is_dirty=false`.",
+    "Draw out the frame/page_table/free_list state transitions on paper before coding."
+  ],
+  "verification": {
+    "items": [
+      {
+        "kind": "invariant",
+        "name": "DiskManager"
+      },
+      {
+        "kind": "invariant",
+        "name": "LRUReplacer"
+      },
+      {
+        "kind": "invariant",
+        "name": "BufferManager"
+      }
+    ]
+  },
+  "submission": {
+    "archive": "<student id>_proj1.zip",
+    "where": "Upload the archive to PLMS (https://plms.postech.ac.kr) under Project #1 before the deadline. Submissions sent by email, or left anywhere else, are not collected.",
+    "files": [
+      "src/disk/disk_manager.cpp",
+      "src/buffer/replacer.cpp",
+      "src/buffer/buffer_manager.cpp"
+    ],
+    "extras": [
+      {
+        "name": "result.txt",
+        "description": "Output of `ctest --test-dir build --output-on-failure > result.txt 2>&1`"
+      },
+      {
+        "name": "REPORT.md",
+        "description": "Your report (see the sections below)"
+      }
+    ],
+    "note": "Keep the original directory layout inside the archive (src/…), so the files drop straight back into the project tree. Submit only the files you edited: no build/ directory, no compiled objects, no reference libraries.",
+    "report": [
+      {
+        "section": "Problem Analysis",
+        "weight": 20,
+        "description": "What each function you write has to solve, and what the code handed to you for this project does — the parts you read but did not write."
+      },
+      {
+        "section": "Design",
+        "weight": 10,
+        "description": "The algorithm you chose for each function, and why that one."
+      },
+      {
+        "section": "Mapping",
+        "weight": 10,
+        "description": "Which part of the design is which part of your code, by file and line."
+      },
+      {
+        "section": "Verification",
+        "weight": 50,
+        "description": "The argument that your code is right.",
+        "parts": [
+          {
+            "weight": 25,
+            "listModules": true,
+            "blocks": [
+              {
+                "text": "**For each module below, write one expression that is always true of it** — true before any of its functions is called, and true again every time one of them returns. It may go false in the middle of a function; that is what makes it worth writing down."
+              },
+              {
+                "text": "The expression is symbols, not words:"
+              },
+              {
+                "code": [
+                  "gcd(num, den) = 1 and den > 0"
+                ]
+              },
+              {
+                "text": "If something is hard to put in symbols, define it as a variable in words, then use the variable in the expression:"
+              },
+              {
+                "code": [
+                  "P = the spaces with a car in them",
+                  "F = the spaces that are empty",
+                  "",
+                  "P union F = {0 .. total_spaces-1}",
+                  "|F| = free_count"
+                ]
+              },
+              {
+                "text": "You can use a loop:"
+              },
+              {
+                "code": [
+                  "for i in 0 .. total_spaces-1:  i in P or i in F"
+                ]
+              },
+              {
+                "text": "A module holds several such expressions true at once. Pick one and get it right; you do not have to find them all."
+              }
+            ]
+          },
+          {
+            "weight": 25,
+            "blocks": [
+              {
+                "text": "**For each function you wrote, show your expression is still true when it returns.** A line or two each, grouped by module."
+              },
+              {
+                "text": "If a function cannot affect the expression, say so in one line. If it could, say which step keeps it true."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "grading": {
+    "criteria": [
+      {
+        "item": "Report",
+        "weight": "90%",
+        "description": "Four sections, below: Problem Analysis 20, Design 10, Mapping 10, Verification 50. Its claims are checked against your code — an expression the report states and the code breaks is a failure of the report."
+      },
+      {
+        "item": "Code",
+        "weight": "10%",
+        "description": "Autograded on this project's own test suite."
+      }
+    ]
+  }
+}

@@ -1,0 +1,336 @@
+{
+  "id": "proj7",
+  "title": "Vector Similarity Search (DiskANN)",
+  "points": 100,
+  "releaseDate": "2026-11-25",
+  "dueDate": "2026-12-11",
+  "tests": 18,
+  "overview": "In this project you will add **vector similarity search** to EduDBMS, enabling queries like:\n\n```sql\nCREATE TABLE photos (id INTEGER, path VARCHAR, embedding VECTOR(512));\nINSERT INTO photos VALUES (1, '/img/dog.jpg', [0.12, 0.45, ...]);\nSELECT * FROM photos ORDER BY embedding <-> [0.33, 0.21, ...] LIMIT 5;\n```\n\nThis is inspired by [pgvector](https://github.com/pgvector/pgvector), which extends PostgreSQL with vector operations. Vector similarity search powers **image retrieval** (find visually similar images), **semantic text search** (find documents matching a query meaning), and **multimodal search** (search images with text queries via CLIP embeddings).\n\nUnlike previous projects that focused on a single DBMS layer, this project requires coordinated changes across **9 layers**. The diagram below shows how a vector query flows through each layer:\n\n```\nSQL: SELECT * FROM photos ORDER BY embedding <-> [0.3, 0.2] LIMIT 5\n  │\n  ▼\n[Lexer]      embedding → IDENTIFIER\n             <->       → OP_L2_DIST    ← new token\n             [0.3,0.2] → LIT_VECTOR   ← new token\n             LIMIT 5   → KW_LIMIT, 5\n  │\n  ▼\n[Parser]     ORDER BY embedding <-> [0.3,0.2]\n             → OrderByItem { DistanceExpr(ColumnRef, VectorLiteral) }\n             LIMIT 5 → stmt.SetLimit(5)\n  │\n  ▼\n[Planner]    Detects DistanceExpr in ORDER BY + LIMIT\n             → LogicalVectorScan(photos, embedding, [0.3,0.2], 5)\n             instead of LogicalSort + LogicalScan\n  │\n  ▼\n[Optimizer]  LogicalVectorScan → PhysicalVectorScan\n             (pass-through, no cost estimation needed)\n  │\n  ▼\n[Executor]   VectorScanExec.Open():\n               calls DiskANNIndex.Search([0.3,0.2], 5)\n               → returns 5 nearest node_ids\n             VectorScanExec.Next():\n               returns table_rows[node_id] one at a time\n  │\n  ▼\n[DiskANN]    Search: greedy beam search on proximity graph\n             Build: Vamana algorithm (Search + RobustPrune per node)\n             L2Distance: sqrt(sum((a[i]-b[i])^2))\n```\n\nSome layers are **already modified for you** (you study the changes). Other layers have **TODO functions you implement**. Each task below specifies exactly which files were changed, what code was added, and what you need to implement.",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Layer 1-2: Type System & Vector Data Structures (Provided)",
+      "description": "**These layers are already implemented. Read and understand them.**\n\n### Layer 1: DataType Enum (`src/common/types.h`)\n\nA new `VECTOR` value was added to the `DataType` enum:\n\n```cpp\nenum class DataType {\n    INTEGER,\n    FLOAT,\n    STRING,\n    BOOLEAN,\n    VECTOR,   // ← NEW\n};\n```\n\n`DataTypeToString()` was also updated to return `\"VECTOR\"` for this type. This allows the catalog and schema to recognize vector columns.\n\n### Layer 2: Vector Struct (`src/vector/vector_types.h` — new file)\n\nA new file defines the `Vector` struct and utility functions:\n\n```cpp\nstruct Vector {\n    std::vector<float> data;  // the actual float values\n    uint32_t Dim() const;     // number of dimensions\n    std::string ToString() const; // \"[1.0, 2.0, 3.0]\"\n};\n\n// Declared here, YOU implement in diskann_index.cpp (Task 3)\nfloat L2Distance(const Vector& a, const Vector& b);\n\n// Converts string \"[1.0, 2.0]\" → Vector{1.0, 2.0}\n// Already implemented for you\nVector ParseVectorLiteral(const std::string& s);\n```\n\n**Action:** Read `src/vector/vector_types.h` to understand the Vector API. You will use `Vector`, `L2Distance`, and `ParseVectorLiteral` in later tasks.",
+      "file": "src/common/types.h, src/vector/vector_types.h",
+      "functions": []
+    },
+    {
+      "id": 2,
+      "title": "Layer 3-4: Lexer & AST Changes (Provided)",
+      "description": "**These layers are already implemented. Read and understand the changes.**\n\n### Layer 3: Lexer (`src/parser/lexer.cpp`)\n\nThree new token types were added to `src/parser/token.h`:\n\n```cpp\nKW_VECTOR,   // the keyword VECTOR\nOP_L2_DIST,  // the operator <->\nLIT_VECTOR,  // a vector literal like [1.0, 2.0, 3.0]\n```\n\nThe lexer was modified in three places:\n\n**1. `<->` operator** (in the `<` branch of the switch): When the lexer sees `<`, it now checks if the next two characters are `->`. If so, it emits `OP_L2_DIST` instead of `OP_LT`.\n\n```cpp\ncase '<':\n    Advance();\n    if (... == '-' && ... == '>') {\n        Advance(); Advance();\n        tokens.emplace_back(TokenType::OP_L2_DIST, \"<->\");\n    } else if (... == '=') { ... OP_LE ... }\n    else { ... OP_LT ... }\n```\n\n**2. `[...]` vector literal**: A new `case '['` reads everything until `]` and emits `LIT_VECTOR`. The value includes the brackets: `\"[1.0, 2.0, 3.0]\"`.\n\n**3. `VECTOR` keyword**: Added to the keyword map so `VECTOR` is recognized as `KW_VECTOR` (not as an identifier).\n\n### Layer 4: AST Nodes (`src/parser/ast.h`)\n\nTwo new expression types and one statement extension:\n\n**`DistanceExpr`** — represents `column <-> target`:\n```cpp\nclass DistanceExpr : public Expression {\n    Expression* GetColumn();  // left side (e.g., ColumnRef \"embedding\")\n    Expression* GetTarget();  // right side (e.g., VectorLiteral)\n};\n```\n\n**`VectorLiteral`** — represents `[1.0, 2.0, 3.0]`:\n```cpp\nclass VectorLiteral : public Expression {\n    const std::string& GetValue(); // \"[1.0, 2.0, 3.0]\"\n};\n```\n\n**`SelectStatement`** — LIMIT support added:\n```cpp\nvoid SetLimit(int limit);\nint GetLimit() const;\nbool HasLimit() const;\n```\n\n**Action:** Open `src/parser/token.h`, `src/parser/lexer.cpp`, and `src/parser/ast.h`. Find each change described above. Understand how `embedding <-> [1.0, 2.0] LIMIT 5` becomes tokens, then AST nodes.",
+      "file": "src/parser/token.h, src/parser/lexer.cpp, src/parser/ast.h",
+      "functions": []
+    },
+    {
+      "id": 3,
+      "title": "Layer 5: Parser — You Implement",
+      "description": "**The parser framework is set up. You fill in two functions.**\n\nThe parser was modified in three places (already done for you):\n\n**1. `ParseComparison()`** now detects `<->`:\n```cpp\n// In parser.cpp — already modified\nif (Check(TokenType::OP_L2_DIST)) {\n    return ParseDistanceExpr(std::move(left));  // ← calls YOUR function\n}\n```\n\n**2. `ParseSelect()`** now calls `ParseLimit()`:\n```cpp\n// In parser.cpp — already modified\nParseOrderBy(*stmt);\nParseLimit(*stmt);  // ← calls YOUR function\n```\n\n**3. `ParsePrimary()`** handles vector literals:\n```cpp\n// In parser.cpp — already modified\nif (Check(TokenType::LIT_VECTOR)) {\n    auto t = Advance();\n    return std::make_unique<VectorLiteral>(t.value);\n}\n```\n\n**4. `ParseCreateTable()`** handles `VECTOR(N)` column type:\n```cpp\n// In parser.cpp — already modified\nif (Check(TokenType::KW_VECTOR)) {\n    Advance();\n    type_name = \"VECTOR\";\n    if (Match(TokenType::LPAREN)) {\n        type_name += \"(\" + Advance().value + \")\";\n        Expect(TokenType::RPAREN);\n    }\n}\n```\n\n**Now you implement the two missing functions:**",
+      "file": "src/parser/parser.cpp",
+      "functions": [
+        {
+          "name": "ParseDistanceExpr(unique_ptr<Expression> left) → unique_ptr<Expression>",
+          "description": "Called when `ParseComparison()` sees `OP_L2_DIST` after parsing the left expression. The `left` parameter is already parsed (e.g., `ColumnRef(\"embedding\")`). You need to:\n1. Consume the `<->` token\n2. Parse the right expression (the vector literal)\n3. Return a `DistanceExpr` wrapping both\n\nExample input: `embedding <-> [1.0, 2.0]`\n- `left` = `ColumnRef(\"embedding\")` (already parsed)\n- You consume `<->` and parse `[1.0, 2.0]` → `VectorLiteral`\n- Return `DistanceExpr(left, right)`",
+          "hints": [
+            "`Advance()` consumes the `OP_L2_DIST` token.",
+            "`auto right = ParsePrimary()` parses the vector literal.",
+            "Return `make_unique<DistanceExpr>(std::move(left), std::move(right))`."
+          ],
+          "lines": 5
+        },
+        {
+          "name": "ParseLimit(SelectStatement& stmt)",
+          "description": "Called after `ParseOrderBy()`. If the next token is `KW_LIMIT`, consume it and parse the integer value.\n\nExample: `... ORDER BY x LIMIT 5;`\n- Token stream at this point: `KW_LIMIT`, `LIT_INTEGER(\"5\")`, `SEMICOLON`\n- You consume LIMIT, read 5, call `stmt.SetLimit(5)`\n\nIf there is no LIMIT keyword, do nothing and return.",
+          "hints": [
+            "`if (!Check(TokenType::KW_LIMIT)) return;`",
+            "`Advance()` to consume LIMIT.",
+            "Check for `LIT_INTEGER`, convert with `std::stoi(Advance().value)`.",
+            "`stmt.SetLimit(value)`."
+          ],
+          "lines": 8
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Layer 6: Planner — You Implement",
+      "description": "**The planner framework is set up. You implement one function.**\n\nThe planner was modified (already done for you):\n\n**`PlanSelect()`** now calls `TryPlanVectorScan()` first:\n```cpp\n// In planner.cpp — already modified\nauto vector_plan = TryPlanVectorScan(stmt);\nif (vector_plan) {\n    // Skip normal Scan → Filter → Sort pipeline\n    // Go directly to Project → VectorScan\n    return make_unique<LogicalProject>(..., std::move(vector_plan));\n}\n// Otherwise, fall through to normal planning...\n```\n\n**`CloneExpression()`** was extended to handle new expression types:\n```cpp\n// In planner.cpp — already modified\nif (auto* dist = dynamic_cast<const DistanceExpr*>(expr)) {\n    return make_unique<DistanceExpr>(\n        CloneExpression(dist->GetColumn()),\n        CloneExpression(dist->GetTarget()));\n}\nif (auto* vec = dynamic_cast<const VectorLiteral*>(expr)) {\n    return make_unique<VectorLiteral>(vec->GetValue());\n}\n```\n\n**`LogicalVectorScan`** was added to `logical_plan.h`:\n```cpp\nclass LogicalVectorScan : public LogicalPlanNode {\n    string table_name_;    // \"photos\"\n    string column_name_;   // \"embedding\"\n    Expression* target_;   // VectorLiteral [0.3, 0.2]\n    int limit_;            // 5\n};\n```\n\n**Now you implement:**",
+      "file": "src/planner/planner.cpp",
+      "functions": [
+        {
+          "name": "TryPlanVectorScan(const SelectStatement& stmt) → unique_ptr<LogicalPlanNode>",
+          "description": "Detect if this query is a vector similarity search. The pattern is:\n- `ORDER BY` contains exactly one `DistanceExpr`\n- `LIMIT` is set\n- Single table (no joins)\n\nIf the pattern matches, return a `LogicalVectorScan`. Otherwise return `nullptr` (the normal planner will handle it).\n\nExample: `SELECT * FROM photos ORDER BY embedding <-> [0.3, 0.2] LIMIT 5`\n- `stmt.GetOrderBy()[0].expr` is a `DistanceExpr`\n- `DistanceExpr::GetColumn()` → `ColumnRef(\"embedding\")`\n- `DistanceExpr::GetTarget()` → `VectorLiteral(\"[0.3, 0.2]\")`\n- `stmt.GetLimit()` → 5\n- `stmt.GetFromTables()[0]` → `\"photos\"`\n- Return `LogicalVectorScan(\"photos\", \"embedding\", target, 5)`",
+          "hints": [
+            "Guard: `if (!stmt.HasOrderBy() || !stmt.HasLimit()) return nullptr;`",
+            "Guard: `if (stmt.GetOrderBy().size() != 1) return nullptr;`",
+            "`auto* dist = dynamic_cast<const DistanceExpr*>(stmt.GetOrderBy()[0].expr.get());`",
+            "If `dist` is null → not a vector query → return nullptr.",
+            "`auto* col = dynamic_cast<const ColumnRef*>(dist->GetColumn());`",
+            "Extract table name from `stmt.GetFromTables()[0]`.",
+            "`CloneExpression(dist->GetTarget())` for the target vector.",
+            "Return `make_unique<LogicalVectorScan>(table, col_name, target, limit)`."
+          ],
+          "lines": 20
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Layer 7: Optimizer (Provided)",
+      "description": "**This layer is already implemented. Read and understand it.**\n\nTwo changes were made:\n\n**`PhysicalVectorScan`** added to `physical_plan.hpp`:\n```cpp\nclass PhysicalVectorScan : public PhysicalPlanNode {\n    string table_name_;     // \"photos\"\n    string column_name_;    // \"embedding\"\n    Expression* target_;    // VectorLiteral\n    int limit_;             // 5\n};\n```\n\n**`OptimizeVectorScan()`** added to `dp_optimizer.hpp` — a simple pass-through:\n```cpp\nstd::unique_ptr<PhysicalPlanNode> OptimizeVectorScan(LogicalVectorScan* node) {\n    return make_unique<PhysicalVectorScan>(\n        node->GetTableName(), node->GetColumnName(),\n        CloneExpression(node->GetTargetVector()), node->GetLimit());\n}\n```\n\nNo cost estimation is needed because vector search always uses the DiskANN index (there's no alternative access path to compare against).\n\n**Action:** Read the `PhysicalVectorScan` class in `physical_plan.hpp`. The Engine uses this to construct a `VectorScanExec` at execution time.",
+      "file": "src/optimizer/dp_optimizer.hpp, src/optimizer/physical_plan.hpp",
+      "functions": []
+    },
+    {
+      "id": 6,
+      "title": "Layer 8: DiskANN Index — You Implement",
+      "description": "**The class is declared. You implement 4 functions.**\n\nThe `DiskANNIndex` class is in `src/vector/diskann_index.h` (provided):\n\n```cpp\nclass DiskANNIndex {\npublic:\n    DiskANNIndex(uint32_t max_degree = 32, uint32_t beam_width = 64);\n    void Build(const vector<Vector>& vectors);       // YOU IMPLEMENT\n    vector<pair<uint32_t, float>> Search(             // YOU IMPLEMENT\n        const Vector& query, uint32_t k);\n    void RobustPrune(uint32_t node_id,                // YOU IMPLEMENT\n        vector<pair<uint32_t, float>>& candidates);\nprivate:\n    uint32_t max_degree_;   // R: max neighbors per node\n    uint32_t beam_width_;   // L: search beam width\n    uint32_t entry_point_;  // starting node for search\n    vector<Vector> vectors_;              // all indexed vectors\n    vector<vector<uint32_t>> adjacency_;  // neighbor lists\n};\n```\n\n**Also implement `L2Distance` (the fundamental metric):**",
+      "file": "src/vector/diskann_index.cpp",
+      "functions": [
+        {
+          "name": "L2Distance(const Vector& a, const Vector& b) → float",
+          "description": "Euclidean distance: `sqrt(sum((a[i] - b[i])^2))`. Used by Search, Build, and RobustPrune.",
+          "hints": [
+            "Loop through `a.Dim()` dimensions.",
+            "Accumulate squared differences.",
+            "Return `std::sqrt(sum)`."
+          ],
+          "lines": 8
+        },
+        {
+          "name": "Search(const Vector& query, uint32_t k) → vector<pair<uint32_t, float>>",
+          "description": "Greedy beam search starting from `entry_point_`.\n\n```\ncandidates = {entry_point}\nvisited = {}\nresult = [] (sorted by distance, max size = beam_width_)\n\nwhile candidates has unvisited nodes:\n    p = closest unvisited in candidates\n    mark p visited\n    if p farther than result[L-1]: skip\n    for each neighbor n of p:\n        d = L2Distance(query, vectors[n])\n        if d < result.back() or |result| < L:\n            add (d, n) to candidates and result\n            sort result, trim to L\nreturn first K entries of result\n```",
+          "hints": [
+            "Min-heap (`priority_queue` with `greater`) for candidates.",
+            "`unordered_set<uint32_t>` for visited.",
+            "Sorted `vector<pair<float, uint32_t>>` as result set.",
+            "Only explore if distance < farthest result (pruning).",
+            "Trim result to `beam_width_` after each insertion."
+          ],
+          "lines": 45
+        },
+        {
+          "name": "RobustPrune(uint32_t node_id, vector<pair<uint32_t, float>>& candidates)",
+          "description": "Select up to `max_degree_` diverse neighbors.\n\n```\nsort candidates by distance\nselected = []\nfor each candidate c (closest first):\n    if |selected| >= max_degree_: break\n    if L2Distance(any_selected, c) < dist(node, c):\n        skip (c is \"covered\" by existing neighbor)\n    else:\n        selected.add(c)\nadjacency_[node_id] = selected\n```\n\nThe diversity check prevents all neighbors from clustering in one direction.",
+          "hints": [
+            "Sort `candidates` by `.second` (distance) ascending.",
+            "Inner loop: for each already-selected neighbor, compute `L2Distance(selected, candidate)`.",
+            "If any selected neighbor is closer to the candidate than the node is → skip.",
+            "Store final list in `adjacency_[node_id]`."
+          ],
+          "lines": 25
+        },
+        {
+          "name": "Build(const vector<Vector>& vectors)",
+          "description": "Vamana graph construction:\n\n```\n1. Store vectors, allocate adjacency lists\n2. entry_point_ = 0\n3. For each node: assign R random neighbors (initial graph)\n4. Shuffle node order\n5. For each node i (in shuffled order):\n    a. candidates = Search(vectors[i], beam_width)\n    b. Remove self from candidates\n    c. RobustPrune(i, candidates)  → sets adjacency_[i]\n    d. For each j in adjacency_[i]:\n         Add reverse edge: j → i\n         If |adjacency_[j]| > max_degree_:\n             Re-prune j\n```",
+          "hints": [
+            "Use `std::mt19937 rng(42)` for deterministic random init.",
+            "Random init: for each node, pick `max_degree_` random other nodes.",
+            "`std::shuffle(order.begin(), order.end(), rng)` for processing order.",
+            "Reverse edge: `if i not in adjacency_[j], add it`.",
+            "Re-prune: compute distances for j's neighbors, call `RobustPrune(j, ...)`."
+          ],
+          "lines": 40
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Layer 9: Executor — You Implement",
+      "description": "**The class is declared. You implement Open() and Next().**\n\n`VectorScanExec` is in `src/execution/vector_scan_exec.h` (provided):\n\n```cpp\nclass VectorScanExec : public Executor {\npublic:\n    VectorScanExec(DiskANNIndex* index,\n                   const vector<Row>* table_rows,\n                   const Vector& query_vector,\n                   int limit);\n    void Open() override;               // YOU IMPLEMENT\n    optional<Row> Next() override;       // YOU IMPLEMENT\n    void Close() override {}             // provided (no-op)\nprivate:\n    DiskANNIndex* index_;\n    const vector<Row>* table_rows_;     // rows indexed by node_id\n    Vector query_vector_;\n    int limit_;\n    vector<uint32_t> result_ids_;       // node_ids from Search\n    size_t idx_;\n};\n```\n\nThe Engine (already wired) creates a `VectorScanExec` when it encounters a `PhysicalVectorScan` plan node. It passes the DiskANN index, the table's rows, the query vector, and the LIMIT value.",
+      "file": "src/execution/vector_scan_exec.cpp",
+      "functions": [
+        {
+          "name": "VectorScanExec::Open()",
+          "description": "Call the DiskANN index to find the K nearest neighbors of `query_vector_`.\n\n1. `auto results = index_->Search(query_vector_, limit_);`\n2. Extract `node_id` from each result into `result_ids_`.\n3. Reset `idx_ = 0`.",
+          "hints": [
+            "`index_->Search()` returns `vector<pair<uint32_t, float>>`.",
+            "Loop: `for (auto& [node_id, dist] : results) result_ids_.push_back(node_id);`."
+          ],
+          "lines": 5
+        },
+        {
+          "name": "VectorScanExec::Next() → optional<Row>",
+          "description": "Return the next row from the table in similarity order.\n\n1. If `idx_ >= result_ids_.size()`, return `nullopt`.\n2. Get `node_id = result_ids_[idx_++]`.\n3. Return `(*table_rows_)[node_id]`.",
+          "hints": [
+            "Bounds check first.",
+            "Table rows are indexed by the same node_id used by the DiskANN index."
+          ],
+          "lines": 5
+        }
+      ]
+    }
+  ],
+  "testing": {
+    "buildCommands": [
+      "cmake -B build",
+      "cmake --build build"
+    ],
+    "runCommand": "ctest --test-dir build --output-on-failure",
+    "testFile": "tests/proj7_vector_test.cpp",
+    "breakdown": [
+      {
+        "suite": "L2 Distance",
+        "count": 3,
+        "covers": "Identical (→0), 3-4-5 triangle (→5), high dimension"
+      },
+      {
+        "suite": "DiskANN Build+Search",
+        "count": 4,
+        "covers": "9-point grid, K results sorted, exact match, between-points query"
+      },
+      {
+        "suite": "Recall",
+        "count": 2,
+        "covers": "100 vectors 8-dim (recall>0.5), 500 vectors 16-dim (recall>0.4)"
+      },
+      {
+        "suite": "SQL Parsing",
+        "count": 4,
+        "covers": "VECTOR(3) column type, <-> operator, LIMIT clause, full vector query"
+      },
+      {
+        "suite": "VectorScanExec",
+        "count": 1,
+        "covers": "Build index → search → verify rows returned in distance order"
+      },
+      {
+        "suite": "Edge Cases",
+        "count": 4,
+        "covers": "Max degree respected, single vector, two vectors, ParseVectorLiteral"
+      }
+    ],
+    "note": "This project is independent of Project #1-#6. Recall tests compare against brute-force KNN — your DiskANN must achieve at least the stated recall thresholds.",
+    "localTests": 121,
+    "platforms": "macOS or Linux, on either Intel or ARM. On Windows, build inside WSL: a native Windows toolchain is refused, because the reference libraries these downloads carry are built for macOS and Linux only."
+  },
+  "hints": [
+    "Read Tasks 1-2 and 5 first (provided code). You need to understand the data flow before implementing.",
+    "Start with L2Distance (8 lines) — everything depends on it.",
+    "Then ParseDistanceExpr + ParseLimit (13 lines total) — run proj7_test to verify SQL parsing works.",
+    "Then Search — you can test it on a graph with random neighbors before Build is ready.",
+    "Then RobustPrune, then Build — these make the graph quality high enough to pass recall tests.",
+    "TryPlanVectorScan is pattern-matching: does ORDER BY have a DistanceExpr? Is there a LIMIT?",
+    "VectorScanExec is the easiest (10 lines total) — implement it last.",
+    "The DiskANN paper (Subramanya et al., NeurIPS 2019) has the full algorithm. Our implementation simplifies it (single pass, in-memory, no PQ compression)."
+  ],
+  "verification": {
+    "items": [
+      {
+        "kind": "invariant",
+        "name": "DiskANNIndex"
+      },
+      {
+        "kind": "property",
+        "name": "VectorScanExec"
+      }
+    ]
+  },
+  "submission": {
+    "archive": "<student id>_proj7.zip",
+    "where": "Upload the archive to PLMS (https://plms.postech.ac.kr) under Project #7 before the deadline. Submissions sent by email, or left anywhere else, are not collected.",
+    "files": [
+      "src/vector/diskann_index.cpp",
+      "src/execution/vector_scan_exec.cpp"
+    ],
+    "extras": [
+      {
+        "name": "result.txt",
+        "description": "Output of `ctest --test-dir build --output-on-failure > result.txt 2>&1`"
+      },
+      {
+        "name": "REPORT.md",
+        "description": "Your report (see the sections below)"
+      }
+    ],
+    "note": "Keep the original directory layout inside the archive (src/…), so the files drop straight back into the project tree. Submit only the files you edited: no build/ directory, no compiled objects, no reference libraries.",
+    "report": [
+      {
+        "section": "Problem Analysis",
+        "weight": 20,
+        "description": "What each function you write has to solve, and what the code handed to you for this project does — the parts you read but did not write. The earlier projects are out of scope: they arrive as a compiled library."
+      },
+      {
+        "section": "Design",
+        "weight": 10,
+        "description": "The algorithm you chose for each function, and why that one."
+      },
+      {
+        "section": "Mapping",
+        "weight": 10,
+        "description": "Which part of the design is which part of your code, by file and line."
+      },
+      {
+        "section": "Verification",
+        "weight": 50,
+        "description": "The argument that your code is right.",
+        "parts": [
+          {
+            "weight": 25,
+            "listModules": true,
+            "blocks": [
+              {
+                "text": "**For each module below, write one expression that is always true of it** — true before any of its functions is called, and true again every time one of them returns. It may go false in the middle of a function; that is what makes it worth writing down."
+              },
+              {
+                "text": "The expression is symbols, not words:"
+              },
+              {
+                "code": [
+                  "gcd(num, den) = 1 and den > 0"
+                ]
+              },
+              {
+                "text": "If something is hard to put in symbols, define it as a variable in words, then use the variable in the expression:"
+              },
+              {
+                "code": [
+                  "P = the spaces with a car in them",
+                  "F = the spaces that are empty",
+                  "",
+                  "P union F = {0 .. total_spaces-1}",
+                  "|F| = free_count"
+                ]
+              },
+              {
+                "text": "You can use a loop:"
+              },
+              {
+                "code": [
+                  "for i in 0 .. total_spaces-1:  i in P or i in F"
+                ]
+              },
+              {
+                "text": "A module holds several such expressions true at once. Pick one and get it right; you do not have to find them all."
+              }
+            ]
+          },
+          {
+            "weight": 25,
+            "blocks": [
+              {
+                "text": "**For each function you wrote, show your expression is still true when it returns.** A line or two each, grouped by module."
+              },
+              {
+                "text": "If a function cannot affect the expression, say so in one line. If it could, say which step keeps it true."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "grading": {
+    "criteria": [
+      {
+        "item": "Report",
+        "weight": "90%",
+        "description": "Four sections, below: Problem Analysis 20, Design 10, Mapping 10, Verification 50. Its claims are checked against your code — an expression the report states and the code breaks is a failure of the report."
+      },
+      {
+        "item": "Code",
+        "weight": "10%",
+        "description": "Autograded on this project's own test suite."
+      }
+    ]
+  }
+}
