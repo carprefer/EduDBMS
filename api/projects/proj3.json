@@ -1,0 +1,257 @@
+{
+  "id": "proj3",
+  "title": "B+-Tree Index",
+  "points": 120,
+  "releaseDate": "2026-10-04",
+  "dueDate": "2026-10-15",
+  "tests": 25,
+  "overview": "In this project you will implement a **disk-based B+-Tree index** for integer keys.\n\nA B+-Tree is a balanced search tree optimized for disk-based storage systems. Unlike in-memory binary search trees, B+-Trees have a high branching factor (hundreds of keys per node) to minimize the number of disk I/O operations needed for a lookup. All actual data pointers reside in leaf nodes, which are linked together via sibling pointers to support efficient range scans.\n\nYour B+-Tree will use the Buffer Manager from Project #1 for page access. Each tree node is stored in a single page. When a node overflows (too many keys), it must be **split**, and a key is pushed up to the parent. This may cascade up to the root, potentially increasing the tree's height.\n\n**Scope limitations:** INTEGER keys only, no delete operation, no duplicate key support (inserting an existing key updates the value).",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Search",
+      "description": "Navigate from the root to the correct leaf node to find a key.",
+      "file": "src/index/bptree.cpp",
+      "functions": [
+        {
+          "name": "Search(int32_t key) → optional<page_id_t>",
+          "description": "Starting at `root_page_id_`, traverse the tree to find the leaf node that would contain `key`. At each internal node, use binary search (via `upper_bound`) on the keys to find the correct child pointer. At the leaf, use binary search to check for an exact match. Return the associated value if found, `nullopt` otherwise.",
+          "hints": [
+            "Use `LoadNode(page_id)` to read a node from disk (provided helper).",
+            "For internal nodes: `upper_bound` returns the index of the first key > given key. The child at that index is the correct subtree.",
+            "For leaf nodes: `lower_bound` finds the position where key would be. Check `*it == key`.",
+            "This is an iterative traversal (loop until `is_leaf == true`)."
+          ],
+          "lines": 25
+        },
+        {
+          "name": "Delete(int32_t key) → bool",
+          "description": "Remove a key and its value from the tree. Return `false` if the key is not there.",
+          "hints": [
+            "Walk to the leaf that would hold the key, the same way `Search` does.",
+            "Binary search the leaf; not found means `false`.",
+            "Erase the key and its value together, then save the leaf.",
+            "No merge or redistribute — a leaf is allowed to underflow."
+          ],
+          "lines": 20
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Insert",
+      "description": "Insert a key-value pair, splitting nodes as needed to maintain the B+-Tree invariants.",
+      "file": "src/index/bptree.cpp",
+      "functions": [
+        {
+          "name": "Insert(int32_t key, page_id_t value)",
+          "description": "Navigate to the correct leaf (like Search), tracking the path from root to leaf as a stack of `(page_id, child_index)` pairs. Insert the key/value in sorted order.\n\n**If the leaf does not overflow** (keys.size() <= MaxKeys()), save it and return.\n\n**If the leaf overflows**, split it in memory:\n1. Create a new leaf with the upper half of keys/values.\n2. Update sibling pointers (`next_leaf`).\n3. Save both halves to disk.\n4. Push the first key of the new leaf up to the parent via `InsertIntoInternal()`.\n\n**Critical:** Do NOT serialize the overflowed node to disk before splitting — it exceeds DB_PAGE_SIZE and will corrupt data.",
+          "hints": [
+            "Track the path: `vector<pair<page_id_t, int>> path`.",
+            "For duplicate keys: update the value and return early.",
+            "Split point: `mid = keys.size() / 2`.",
+            "Use `AllocateNode()` (provided) to create the new leaf page.",
+            "If the path is empty when a split occurs, the leaf was the root — create a new root."
+          ],
+          "lines": 60
+        },
+        {
+          "name": "InsertIntoInternal(page_id_t node_id, int32_t key, page_id_t right_child, vector<pair<page_id_t,int>>& path)",
+          "description": "Insert a key and right child pointer into an internal node (called when a child node was split). If the internal node also overflows, split it: the middle key goes up to the parent, the left half stays, the right half goes to a new node. This may cascade up to the root.",
+          "hints": [
+            "Use `upper_bound` to find insertion position for the key.",
+            "Insert key at position, insert right_child at position+1 in children.",
+            "Split point: `mid = keys.size() / 2`. The key at `mid` goes up (not stored in either child).",
+            "Pop from `path` to get the parent. If path is empty, create a new root."
+          ],
+          "lines": 30
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Range Scan",
+      "description": "Scan leaf nodes to return all entries in a key range.",
+      "file": "src/index/bptree.cpp",
+      "functions": [
+        {
+          "name": "RangeScan(int32_t begin_key, int32_t end_key) → vector<pair<int32_t, page_id_t>>",
+          "description": "Find the leaf containing `begin_key` (traverse like Search). Then scan forward through the leaf chain using `next_leaf` sibling pointers, collecting all `(key, value)` pairs where `begin_key <= key <= end_key`. Stop when `key > end_key` or you reach the end of the chain (`next_leaf == INVALID_PAGE_ID`).",
+          "hints": [
+            "Reuse the Search traversal logic to find the starting leaf.",
+            "Inner loop: iterate through keys in the current leaf.",
+            "Outer loop: follow `next_leaf` to the next leaf page."
+          ],
+          "lines": 20
+        }
+      ]
+    }
+  ],
+  "testing": {
+    "buildCommands": [
+      "cmake -B build",
+      "cmake --build build"
+    ],
+    "runCommand": "ctest --test-dir build --output-on-failure",
+    "testFile": "tests/proj3_bptree_test.cpp",
+    "breakdown": [
+      {
+        "suite": "Search",
+        "count": 3,
+        "covers": "Empty tree, single key, non-existent key"
+      },
+      {
+        "suite": "Insert",
+        "count": 6,
+        "covers": "In-order, reverse, duplicate update, leaf split, multi-leaf growth, random order"
+      },
+      {
+        "suite": "Range Scan",
+        "count": 5,
+        "covers": "Full range, partial, empty, single key, across leaves"
+      },
+      {
+        "suite": "Delete",
+        "count": 5,
+        "covers": "Single key, non-existent, empty tree, other keys preserved, delete then re-insert"
+      },
+      {
+        "suite": "Systematic (30 keys)",
+        "count": 5,
+        "covers": "Insert/search/delete sweep, random order, delete-all then reinsert, interleaved ops, range scan after delete"
+      },
+      {
+        "suite": "Large Scale",
+        "count": 1,
+        "covers": "1000-key insert and search"
+      }
+    ],
+    "note": "Project #1-#2 reference implementations are provided. The buffer pool size is set to 64 frames for tree tests.",
+    "localTests": 54,
+    "platforms": "macOS or Linux, on either Intel or ARM. On Windows, build inside WSL: a native Windows toolchain is refused, because the reference libraries these downloads carry are built for macOS and Linux only."
+  },
+  "hints": [
+    "Start with Search — it's the simplest and helps you verify that LoadNode/SaveNode work correctly.",
+    "Implement Insert without splits first. Insert up to MaxKeys() entries and verify Search finds them all.",
+    "Then add leaf splitting. Test with sequential inserts that exceed one leaf's capacity.",
+    "InsertIntoInternal is the trickiest part. The middle key goes UP (removed from the node), unlike leaf splits where the split key stays in the right leaf.",
+    "Use small test cases you can trace by hand. Draw the tree after each insertion.",
+    "The provided `SerializeNode`/`DeserializeNode` handle all disk formatting — you only work with `BPTreeNode` structs in memory.",
+    "Node capacity: with DB_PAGE_SIZE=4096, each leaf holds ~510 keys. You need >510 inserts to trigger the first split."
+  ],
+  "verification": {
+    "items": [
+      {
+        "kind": "invariant",
+        "name": "BPTree"
+      }
+    ]
+  },
+  "submission": {
+    "archive": "<student id>_proj3.zip",
+    "where": "Upload the archive to PLMS (https://plms.postech.ac.kr) under Project #3 before the deadline. Submissions sent by email, or left anywhere else, are not collected.",
+    "files": [
+      "src/index/bptree.cpp"
+    ],
+    "extras": [
+      {
+        "name": "result.txt",
+        "description": "Output of `ctest --test-dir build --output-on-failure > result.txt 2>&1`"
+      },
+      {
+        "name": "REPORT.md",
+        "description": "Your report (see the sections below)"
+      }
+    ],
+    "note": "Keep the original directory layout inside the archive (src/…), so the files drop straight back into the project tree. Submit only the files you edited: no build/ directory, no compiled objects, no reference libraries.",
+    "report": [
+      {
+        "section": "Problem Analysis",
+        "weight": 20,
+        "description": "What each function you write has to solve, and what the given code it calls does for it. Only what your functions actually use — not every header in the download. The earlier projects are out of scope: they arrive as a compiled library."
+      },
+      {
+        "section": "Design",
+        "weight": 10,
+        "description": "The algorithm you chose for each function, and why that one."
+      },
+      {
+        "section": "Mapping",
+        "weight": 10,
+        "description": "Which part of the design is which part of your code, by file and line."
+      },
+      {
+        "section": "Verification",
+        "weight": 50,
+        "description": "The argument that your code is right.",
+        "parts": [
+          {
+            "weight": 25,
+            "listModules": true,
+            "blocks": [
+              {
+                "text": "**For each module below, write one expression that is always true of it** — true before any of its functions is called, and true again every time one of them returns. It may go false in the middle of a function; that is what makes it worth writing down."
+              },
+              {
+                "text": "The expression is symbols, not words:"
+              },
+              {
+                "code": [
+                  "gcd(num, den) = 1 and den > 0"
+                ]
+              },
+              {
+                "text": "If something is hard to put in symbols, define it as a variable in words, then use the variable in the expression:"
+              },
+              {
+                "code": [
+                  "P = the spaces with a car in them",
+                  "F = the spaces that are empty",
+                  "",
+                  "P union F = {0 .. total_spaces-1}",
+                  "|F| = free_count"
+                ]
+              },
+              {
+                "text": "You can use a loop:"
+              },
+              {
+                "code": [
+                  "for i in 0 .. total_spaces-1:  i in P or i in F"
+                ]
+              },
+              {
+                "text": "A module holds several such expressions true at once. Pick one and get it right; you do not have to find them all."
+              }
+            ]
+          },
+          {
+            "weight": 25,
+            "blocks": [
+              {
+                "text": "**For each function you wrote, show your expression is still true when it returns.** A line or two each, grouped by module."
+              },
+              {
+                "text": "If a function cannot affect the expression, say so in one line. If it could, say which step keeps it true."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "grading": {
+    "criteria": [
+      {
+        "item": "Report",
+        "weight": "90%",
+        "description": "Four sections, below: Problem Analysis 20%, Design 10%, Mapping 10%, Verification 50%. Its claims are checked against your code — an expression the report states and the code breaks is a failure of the report."
+      },
+      {
+        "item": "Code",
+        "weight": "10%",
+        "description": "Autograded on this project's own test suite."
+      }
+    ]
+  }
+}

@@ -1,0 +1,243 @@
+[
+  {
+    "week": 1,
+    "topic": "Introduction",
+    "reading": "Ch. 1",
+    "sessions": [
+      {
+        "date": "2026-09-07",
+        "no": 1
+      },
+      {
+        "date": "2026-09-09",
+        "no": 2
+      }
+    ]
+  },
+  {
+    "week": 2,
+    "topic": "Disk and Files",
+    "reading": "Ch. 8-9",
+    "sessions": [
+      {
+        "date": "2026-09-14",
+        "no": 3
+      },
+      {
+        "date": "2026-09-16",
+        "no": 4,
+        "proj": "Project #1 Released"
+      }
+    ]
+  },
+  {
+    "week": 3,
+    "topic": "Indexing",
+    "reading": "Ch. 10-11",
+    "sessions": [
+      {
+        "date": "2026-09-21",
+        "no": 5
+      },
+      {
+        "date": "2026-09-23",
+        "no": 6,
+        "proj": "Project #1 Due (Sep 25) / Project #2 Released (Sep 25)"
+      }
+    ]
+  },
+  {
+    "week": 4,
+    "topic": "Relational Algebra",
+    "reading": "Ch. 4.1-4.2",
+    "sessions": [
+      {
+        "date": "2026-09-28",
+        "no": 7
+      },
+      {
+        "date": "2026-09-30",
+        "no": 8,
+        "proj": "Project #2 Due (Oct 4) / Project #3 Released (Oct 4)"
+      }
+    ]
+  },
+  {
+    "week": 5,
+    "topic": "Implementation of Relational Algebra: Sorting",
+    "reading": "Ch. 12-13",
+    "sessions": [
+      {
+        "date": "2026-10-05",
+        "type": "holiday",
+        "topic": "No class — National Foundation Day (substitute holiday)"
+      },
+      {
+        "date": "2026-10-07",
+        "no": 9
+      }
+    ]
+  },
+  {
+    "week": 6,
+    "topic": "Implementation of Relational Algebra: Join",
+    "reading": "Ch. 14",
+    "sessions": [
+      {
+        "date": "2026-10-12",
+        "no": 10
+      },
+      {
+        "date": "2026-10-14",
+        "no": 11,
+        "proj": "Project #3 Due (Oct 15) / Project #4 Released (Oct 15)"
+      }
+    ]
+  },
+  {
+    "week": 7,
+    "topic": "Query Optimization",
+    "reading": "Ch. 15",
+    "sessions": [
+      {
+        "date": "2026-10-19",
+        "no": 12
+      },
+      {
+        "date": "2026-10-21",
+        "no": 13,
+        "proj": "Project #4 Due (Oct 22) / Project #5 Released (Oct 22)"
+      }
+    ]
+  },
+  {
+    "week": 8,
+    "topic": "Midterm Exam",
+    "type": "exam",
+    "sessions": [
+      {
+        "date": "2026-10-26",
+        "dateEnd": "2026-10-28"
+      }
+    ]
+  },
+  {
+    "week": 9,
+    "topic": "Transaction Processing",
+    "reading": "Ch. 16-18",
+    "sessions": [
+      {
+        "date": "2026-11-02",
+        "no": 14,
+        "proj": "Project #5 Due (Nov 3) / Project #6 Released (Nov 3)"
+      },
+      {
+        "date": "2026-11-04",
+        "no": 15
+      }
+    ]
+  },
+  {
+    "week": 10,
+    "topic": "ER Model",
+    "reading": "Ch. 2",
+    "sessions": [
+      {
+        "date": "2026-11-09",
+        "no": 16
+      },
+      {
+        "date": "2026-11-11",
+        "no": 17
+      }
+    ]
+  },
+  {
+    "week": 11,
+    "topic": "Relational Model",
+    "reading": "Ch. 3",
+    "sessions": [
+      {
+        "date": "2026-11-16",
+        "no": 18
+      },
+      {
+        "date": "2026-11-18",
+        "no": 19,
+        "proj": "Project #6 Due (Nov 19) / Project #7 Released (Nov 19)"
+      }
+    ]
+  },
+  {
+    "week": 12,
+    "topic": "SQL",
+    "reading": "Ch. 5",
+    "sessions": [
+      {
+        "date": "2026-11-23",
+        "no": 20
+      },
+      {
+        "date": "2026-11-25",
+        "no": 21
+      }
+    ]
+  },
+  {
+    "week": 13,
+    "topic": "Relational Calculus",
+    "reading": "Ch. 4.3-4.4",
+    "sessions": [
+      {
+        "date": "2026-11-30",
+        "no": 22
+      },
+      {
+        "date": "2026-12-02",
+        "no": 23
+      }
+    ]
+  },
+  {
+    "week": 14,
+    "topic": "Database Design",
+    "reading": "Ch. 19-20",
+    "sessions": [
+      {
+        "date": "2026-12-07",
+        "no": 24
+      },
+      {
+        "date": "2026-12-09",
+        "no": 25,
+        "proj": "Project #7 Due (Dec 11)"
+      }
+    ]
+  },
+  {
+    "week": 15,
+    "topic": "Hadoop & Spark",
+    "reading": "Ch. 22",
+    "sessions": [
+      {
+        "date": "2026-12-14",
+        "no": 26
+      },
+      {
+        "date": "2026-12-16",
+        "no": 27
+      }
+    ]
+  },
+  {
+    "week": 16,
+    "topic": "Final Exam",
+    "type": "exam",
+    "sessions": [
+      {
+        "date": "2026-12-21",
+        "dateEnd": "2026-12-23"
+      }
+    ]
+  }
+]

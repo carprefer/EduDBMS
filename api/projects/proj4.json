@@ -1,0 +1,273 @@
+{
+  "id": "proj4",
+  "title": "Query Parser & Planner",
+  "points": 80,
+  "releaseDate": "2026-10-15",
+  "dueDate": "2026-10-22",
+  "tests": 12,
+  "overview": "In this project you will extend the SQL parser and query planner to support **GROUP BY**, **ORDER BY**, and **aggregate functions** (COUNT, SUM, AVG, MIN, MAX).\n\nThe existing parser handles SELECT/FROM/WHERE/JOIN using recursive descent parsing. You will add three new parsing functions that extend the grammar. The planner converts the parsed AST into a logical plan tree. You will add two new logical plan nodes: `LogicalAggregate` and `LogicalSort`.\n\n**Query processing pipeline:**\n```\nSQL string → Lexer → Tokens → Parser → AST → Planner → Logical Plan\n```\n\nAfter this project, the system can parse and plan queries like:\n```sql\nSELECT department, COUNT(*), AVG(salary)\nFROM employees\nGROUP BY department\nORDER BY AVG(salary) DESC\n```",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Parser: GROUP BY",
+      "description": "Add parsing for the GROUP BY clause, which appears after WHERE (if present).",
+      "file": "src/parser/parser.cpp",
+      "functions": [
+        {
+          "name": "ParseGroupBy(SelectStatement& stmt)",
+          "description": "If the next token is `KW_GROUP`, consume it, expect `KW_BY`, then parse a comma-separated list of column expressions. Add each to the statement via `stmt.AddGroupByExpr()`.\n\n**Grammar:**\n```\nGROUP BY expr (, expr)*\n```\n\nIf the next token is not `KW_GROUP`, return without doing anything (GROUP BY is optional).",
+          "hints": [
+            "Use `Check(TokenType::KW_GROUP)` to peek without consuming.",
+            "After consuming GROUP, expect BY with `Expect(TokenType::KW_BY)`.",
+            "Parse each expression with `ParsePrimary()` (reuses existing expression parser).",
+            "Loop with `Match(TokenType::COMMA)` for multiple columns."
+          ],
+          "lines": 15
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Parser: ORDER BY",
+      "description": "Add parsing for the ORDER BY clause, which appears after GROUP BY (or WHERE if no GROUP BY).",
+      "file": "src/parser/parser.cpp",
+      "functions": [
+        {
+          "name": "ParseOrderBy(SelectStatement& stmt)",
+          "description": "If the next token is `KW_ORDER`, consume it, expect `KW_BY`, then parse a comma-separated list of sort keys. Each sort key is an expression optionally followed by ASC or DESC (default: ASC). Wrap each in an `OrderByItem` and add to the statement.\n\n**Grammar:**\n```\nORDER BY expr [ASC|DESC] (, expr [ASC|DESC])*\n```",
+          "hints": [
+            "Similar structure to ParseGroupBy.",
+            "After parsing the expression, check for KW_ASC or KW_DESC.",
+            "Default ascending = true.",
+            "Use `stmt.AddOrderByItem(std::move(item))` to add each sort key."
+          ],
+          "lines": 20
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Parser: Aggregate Expressions",
+      "description": "Add parsing for aggregate function calls in the SELECT list.",
+      "file": "src/parser/parser.cpp",
+      "functions": [
+        {
+          "name": "ParseAggregateExpr(AggFunc func) → unique_ptr<AggregateExpr>",
+          "description": "Parse an aggregate function call. The function keyword (COUNT/SUM/AVG/MIN/MAX) has already been consumed by `ParsePrimary()` and the `AggFunc` type is passed as a parameter. Expect `LPAREN`, parse the argument (or `*` for COUNT), expect `RPAREN`.\n\n**Grammar:**\n```\nCOUNT '(' '*' ')'\nCOUNT '(' expr ')'\nSUM '(' expr ')'\nAVG '(' expr ')'\nMIN '(' expr ')'\nMAX '(' expr ')'\n```",
+          "hints": [
+            "Start with `Expect(TokenType::LPAREN)`.",
+            "For COUNT(*): check `func == AggFunc::COUNT && Check(TokenType::STAR)`.",
+            "Otherwise: parse the argument with `ParsePrimary()`.",
+            "End with `Expect(TokenType::RPAREN)`.",
+            "Return `make_unique<AggregateExpr>(func, std::move(argument), is_count_star)`."
+          ],
+          "lines": 15
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Planner: Logical Plan Nodes",
+      "description": "Extend the planner to create `LogicalAggregate` and `LogicalSort` nodes when the parsed statement contains GROUP BY/ORDER BY.",
+      "file": "src/planner/planner.cpp",
+      "functions": [
+        {
+          "name": "PlanAggregate(const SelectStatement& stmt, unique_ptr<LogicalPlanNode> child) → unique_ptr<LogicalPlanNode>",
+          "description": "If the statement has GROUP BY or contains aggregate functions in the SELECT list, create a `LogicalAggregate` node wrapping the child. Clone the group-by expressions and collect aggregate expressions from the select list.\n\nIf there is no aggregation, return the child unchanged.",
+          "hints": [
+            "Check `stmt.HasGroupBy()` and scan `stmt.GetSelectList()` for `AggregateExpr` nodes.",
+            "Use `CloneExpression()` (provided) to deep-copy expressions.",
+            "Use `dynamic_cast<const AggregateExpr*>` to identify aggregate expressions."
+          ],
+          "lines": 20
+        },
+        {
+          "name": "PlanSort(const SelectStatement& stmt, unique_ptr<LogicalPlanNode> child) → unique_ptr<LogicalPlanNode>",
+          "description": "If the statement has ORDER BY, create a `LogicalSort` node wrapping the child. Clone each sort key expression and collect the ascending/descending flags.\n\nIf there is no ORDER BY, return the child unchanged.",
+          "hints": [
+            "Check `stmt.HasOrderBy()`.",
+            "Clone each `item.expr` from `stmt.GetOrderBy()`.",
+            "Collect `item.ascending` into a `vector<bool>`."
+          ],
+          "lines": 15
+        }
+      ]
+    }
+  ],
+  "testing": {
+    "buildCommands": [
+      "cmake -B build",
+      "cmake --build build"
+    ],
+    "runCommand": "ctest --test-dir build --output-on-failure",
+    "testFile": "tests/proj4_query_test.cpp",
+    "breakdown": [
+      {
+        "suite": "ParserOrderByTest",
+        "count": 3,
+        "covers": "Simple, DESC, multi-column ORDER BY"
+      },
+      {
+        "suite": "ParserGroupByTest",
+        "count": 2,
+        "covers": "Single and multi-column GROUP BY"
+      },
+      {
+        "suite": "ParserAggregateTest",
+        "count": 3,
+        "covers": "COUNT(*), SUM(col), multiple aggregates"
+      },
+      {
+        "suite": "ParserCombinedTest",
+        "count": 1,
+        "covers": "GROUP BY + ORDER BY in same query"
+      },
+      {
+        "suite": "PlannerSortTest",
+        "count": 1,
+        "covers": "LogicalSort node creation"
+      },
+      {
+        "suite": "PlannerAggregateTest",
+        "count": 1,
+        "covers": "LogicalAggregate node creation"
+      },
+      {
+        "suite": "RegressionTest",
+        "count": 1,
+        "covers": "Existing SELECT/WHERE still works"
+      }
+    ],
+    "note": "This project does not depend on Project #1-#3 (no disk I/O). It uses the parser and planner directly.",
+    "localTests": 66,
+    "platforms": "macOS or Linux, on either Intel or ARM. On Windows, build inside WSL: a native Windows toolchain is refused, because the reference libraries these downloads carry are built for macOS and Linux only."
+  },
+  "hints": [
+    "Read the existing `ParseSelect()` to understand the parsing flow — your functions are called at the end of it.",
+    "Study the `ParseJoinClause()` method as a template for how to add new grammar rules.",
+    "GROUP BY and ORDER BY are independent — implement and test them separately.",
+    "The aggregate parsing is triggered from `ParsePrimary()` when it detects a keyword like COUNT/SUM. Your `ParseAggregateExpr` receives the function type as a parameter.",
+    "For the planner, look at how the existing code creates `LogicalFilter` — your `LogicalAggregate` and `LogicalSort` follow the same wrap-the-child pattern.",
+    "The plan tree order is: Scan → Filter → Join → **Aggregate** → **Sort** → Project."
+  ],
+  "verification": {
+    "items": [
+      {
+        "kind": "property",
+        "name": "Parser"
+      },
+      {
+        "kind": "property",
+        "name": "Planner"
+      }
+    ]
+  },
+  "submission": {
+    "archive": "<student id>_proj4.zip",
+    "where": "Upload the archive to PLMS (https://plms.postech.ac.kr) under Project #4 before the deadline. Submissions sent by email, or left anywhere else, are not collected.",
+    "files": [
+      "src/parser/parser.cpp",
+      "src/planner/planner.cpp"
+    ],
+    "extras": [
+      {
+        "name": "result.txt",
+        "description": "Output of `ctest --test-dir build --output-on-failure > result.txt 2>&1`"
+      },
+      {
+        "name": "REPORT.md",
+        "description": "Your report (see the sections below)"
+      }
+    ],
+    "note": "Keep the original directory layout inside the archive (src/…), so the files drop straight back into the project tree. Submit only the files you edited: no build/ directory, no compiled objects, no reference libraries.",
+    "report": [
+      {
+        "section": "Problem Analysis",
+        "weight": 20,
+        "description": "What each function you write has to solve, and what the given code it calls does for it. Only what your functions actually use — not every header in the download. The earlier projects are out of scope: they arrive as a compiled library."
+      },
+      {
+        "section": "Design",
+        "weight": 10,
+        "description": "The algorithm you chose for each function, and why that one."
+      },
+      {
+        "section": "Mapping",
+        "weight": 10,
+        "description": "Which part of the design is which part of your code, by file and line."
+      },
+      {
+        "section": "Verification",
+        "weight": 50,
+        "description": "The argument that your code is right.",
+        "parts": [
+          {
+            "weight": 25,
+            "listModules": true,
+            "blocks": [
+              {
+                "text": "**For each module below, write one expression that is always true of it** — true before any of its functions is called, and true again every time one of them returns. It may go false in the middle of a function; that is what makes it worth writing down."
+              },
+              {
+                "text": "The expression is symbols, not words:"
+              },
+              {
+                "code": [
+                  "gcd(num, den) = 1 and den > 0"
+                ]
+              },
+              {
+                "text": "If something is hard to put in symbols, define it as a variable in words, then use the variable in the expression:"
+              },
+              {
+                "code": [
+                  "P = the spaces with a car in them",
+                  "F = the spaces that are empty",
+                  "",
+                  "P union F = {0 .. total_spaces-1}",
+                  "|F| = free_count"
+                ]
+              },
+              {
+                "text": "You can use a loop:"
+              },
+              {
+                "code": [
+                  "for i in 0 .. total_spaces-1:  i in P or i in F"
+                ]
+              },
+              {
+                "text": "A module holds several such expressions true at once. Pick one and get it right; you do not have to find them all."
+              }
+            ]
+          },
+          {
+            "weight": 25,
+            "blocks": [
+              {
+                "text": "**For each function you wrote, show your expression is still true when it returns.** A line or two each, grouped by module."
+              },
+              {
+                "text": "If a function cannot affect the expression, say so in one line. If it could, say which step keeps it true."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "grading": {
+    "criteria": [
+      {
+        "item": "Report",
+        "weight": "90%",
+        "description": "Four sections, below: Problem Analysis 20%, Design 10%, Mapping 10%, Verification 50%. Its claims are checked against your code — an expression the report states and the code breaks is a failure of the report."
+      },
+      {
+        "item": "Code",
+        "weight": "10%",
+        "description": "Autograded on this project's own test suite."
+      }
+    ]
+  }
+}

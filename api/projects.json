@@ -1,0 +1,144 @@
+[
+  {
+    "id": "proj1",
+    "type": "project",
+    "title": "Disk Manager & Buffer Manager",
+    "description": "Implement page-level disk I/O and a buffer pool with LRU replacement policy. You will build the foundation that all upper layers depend on.",
+    "releaseDate": "2026-09-16",
+    "dueDate": "2026-09-25",
+    "points": 50,
+    "topics": [
+      "Disk I/O",
+      "Page Management",
+      "Buffer Pool",
+      "LRU Replacement"
+    ],
+    "files": [
+      "src/disk/disk_manager.cpp",
+      "src/buffer/replacer.cpp",
+      "src/buffer/buffer_manager.cpp"
+    ],
+    "tests": 17
+  },
+  {
+    "id": "proj2",
+    "type": "project",
+    "title": "Object Manager (Slotted Page)",
+    "description": "Implement a slotted page structure for variable-length record storage. You will handle record insertion, deletion, and serialization/deserialization.",
+    "releaseDate": "2026-09-25",
+    "dueDate": "2026-10-04",
+    "points": 50,
+    "topics": [
+      "Slotted Page",
+      "Record Layout",
+      "Serialization"
+    ],
+    "files": [
+      "src/object/object_manager.cpp"
+    ],
+    "tests": 12
+  },
+  {
+    "id": "proj3",
+    "type": "project",
+    "title": "B+-Tree Index",
+    "description": "Implement a disk-based B+-Tree index supporting search, insertion with leaf/internal node splitting, and range scan via sibling pointers.",
+    "releaseDate": "2026-10-04",
+    "dueDate": "2026-10-15",
+    "points": 120,
+    "topics": [
+      "B+-Tree",
+      "Node Splitting",
+      "Range Scan",
+      "Index Structure"
+    ],
+    "files": [
+      "src/index/bptree.cpp"
+    ],
+    "tests": 25
+  },
+  {
+    "id": "proj4",
+    "type": "project",
+    "title": "Query Parser & Planner",
+    "description": "Extend the SQL parser to handle GROUP BY, ORDER BY, and aggregate functions (COUNT, SUM, AVG, MIN, MAX). Build corresponding logical plan nodes.",
+    "releaseDate": "2026-10-15",
+    "dueDate": "2026-10-22",
+    "points": 80,
+    "topics": [
+      "SQL Parsing",
+      "AST",
+      "Logical Planning",
+      "Aggregation"
+    ],
+    "files": [
+      "src/parser/parser.cpp",
+      "src/planner/planner.cpp"
+    ],
+    "tests": 12
+  },
+  {
+    "id": "proj5",
+    "type": "project",
+    "title": "Query Executor",
+    "description": "Implement Sort, Aggregate, and Index Scan operators following the Volcano iterator model (Open/Next/Close). These operators complete the query execution pipeline.",
+    "releaseDate": "2026-10-22",
+    "dueDate": "2026-11-03",
+    "points": 100,
+    "topics": [
+      "Volcano Model",
+      "Sort Operator",
+      "Hash Aggregation",
+      "Index Scan"
+    ],
+    "files": [
+      "src/execution/sort_exec.cpp",
+      "src/execution/aggregate_exec.cpp",
+      "src/execution/index_scan_exec.cpp"
+    ],
+    "tests": 13
+  },
+  {
+    "id": "proj6",
+    "type": "project",
+    "title": "ARIES Recovery",
+    "description": "Implement a Write-Ahead Log (WAL) and the full ARIES recovery algorithm with Analysis, Redo, and Undo phases. Supports transactions, checkpoints, and crash recovery with compensation log records (CLR).",
+    "releaseDate": "2026-11-03",
+    "dueDate": "2026-11-19",
+    "points": 120,
+    "topics": [
+      "WAL",
+      "ARIES",
+      "Redo",
+      "Undo",
+      "Checkpoint",
+      "CLR"
+    ],
+    "files": [
+      "src/recovery/log_manager.cpp",
+      "src/recovery/recovery_manager.cpp"
+    ],
+    "tests": 17
+  },
+  {
+    "id": "proj7",
+    "type": "project",
+    "title": "Vector Similarity Search (DiskANN)",
+    "description": "Implement a DiskANN graph-based index for approximate nearest neighbor search. Extends the DBMS with vector data type, L2 distance, Vamana graph construction, and greedy beam search — touching storage, index, and query layers.",
+    "releaseDate": "2026-11-19",
+    "dueDate": "2026-12-11",
+    "points": 150,
+    "topics": [
+      "Vector Search",
+      "DiskANN",
+      "Graph Index",
+      "ANN",
+      "L2 Distance",
+      "Beam Search"
+    ],
+    "files": [
+      "src/vector/diskann_index.cpp"
+    ],
+    "tests": 18
+  }
+]
