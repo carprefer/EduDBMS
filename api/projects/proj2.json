@@ -1,0 +1,244 @@
+{
+  "id": "proj2",
+  "title": "Object Manager (Slotted Page)",
+  "points": 50,
+  "releaseDate": "2026-09-25",
+  "dueDate": "2026-10-04",
+  "tests": 12,
+  "overview": "In this project you will implement the **Object Manager**, which handles variable-length record storage within fixed-size pages using a **slotted page** layout.\n\nA slotted page divides each 4 KB page into three regions: a header (tracking the number of slots and free space offset), a slot array (growing forward from the header), and record data (growing backward from the end of the page). This design allows efficient insertion and deletion of variable-length records without external fragmentation.\n\nYou will also implement **serialization** and **deserialization** of database rows (a map of column names to typed values) into compact byte arrays suitable for disk storage.",
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Slotted Page Operations",
+      "description": "The slotted page layout within a `DB_PAGE_SIZE` (4096 byte) page:\n\n```\n┌─────────────────────────────────────────┐  offset 0\n│ PageHeader: num_slots(2B) | free_off(2B)│\n├─────────────────────────────────────────┤  offset 4\n│ SlotInfo[0]: offset(2B) | length(2B)    │\n│ SlotInfo[1]: offset(2B) | length(2B)    │\n│ ...                                     │\n├─────────────────────────────────────────┤\n│           Free Space                    │\n├─────────────────────────────────────────┤\n│ Records (grow downward from page end)   │\n└─────────────────────────────────────────┘  offset 4096\n```\n\nSlots with `offset=0, length=0` are considered deleted. No compaction is required.",
+      "file": "src/object/object_manager.cpp",
+      "functions": [
+        {
+          "name": "InsertRecord(page_id_t page_id, const vector<uint8_t>& record) → slot_id_t",
+          "description": "Insert a serialized record into the specified page. Calculate the available free space as: `free_space_offset - PAGE_HEADER_SIZE - (num_slots * SLOT_INFO_SIZE)`. If the record plus a new slot entry won't fit, return `INVALID_SLOT_ID`. Otherwise, write the record at `free_space_offset - record.size()`, add a new slot entry, and update the header.",
+          "hints": [
+            "Fetch the page via `buffer_manager_->FetchPage(page_id)`.",
+            "Read the header with `ReadHeader(data)` (provided helper).",
+            "Free space = `header.free_space_offset - PAGE_HEADER_SIZE - num_slots * SLOT_INFO_SIZE`.",
+            "Check: `record.size() + SLOT_INFO_SIZE <= free_space`.",
+            "Write record at offset `header.free_space_offset - record.size()`.",
+            "Unpin the page as dirty after modifying."
+          ],
+          "lines": 30
+        },
+        {
+          "name": "DeleteRecord(page_id_t page_id, slot_id_t slot_id)",
+          "description": "Delete a record by setting its slot's offset and length to 0. The space is not reclaimed (no compaction). Simply invalidate the slot entry.",
+          "hints": [
+            "Read the slot with `ReadSlot()`, set both fields to 0, write back with `WriteSlot()`."
+          ],
+          "lines": 15
+        },
+        {
+          "name": "GetRecord(page_id_t page_id, slot_id_t slot_id) → vector<uint8_t>",
+          "description": "Retrieve a record's bytes from the given page and slot. Throw `RecordNotFoundException` if the slot index is out of range or the slot has been deleted (length == 0).",
+          "hints": [
+            "Read the slot info. Check `slot_id < num_slots` and `slot.length > 0`.",
+            "Copy `length` bytes from `data + offset`."
+          ],
+          "lines": 15
+        },
+        {
+          "name": "GetRecordCount(page_id_t page_id) → uint16_t",
+          "description": "Count the records still live in a page. A slot whose length is 0 was deleted and does not count.",
+          "hints": [
+            "Fetch the page and read `num_slots` from the header.",
+            "Count the slots whose length is above 0.",
+            "Unpin the page — you did not change it."
+          ],
+          "lines": 10
+        },
+        {
+          "name": "GetFreeSpace(page_id_t page_id) → uint16_t",
+          "description": "How many bytes a new record could still use in this page: the gap between the end of the slot directory and the start of the record area.",
+          "hints": [
+            "The directory ends at `PAGE_HEADER_SIZE + num_slots * SLOT_INFO_SIZE`.",
+            "The record area starts at `free_space_offset`.",
+            "Unpin the page — you did not change it."
+          ],
+          "lines": 8
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Row Serialization",
+      "description": "Serialize and deserialize `Row` objects (an `unordered_map<string, Value>`) into compact byte arrays. The serialization format follows **schema column order** — this is critical for consistent encoding/decoding.\n\nFor each column in the schema:\n```\n[type_tag: 1 byte] [data: variable]\n  INTEGER → 4 bytes (int32_t, little-endian)\n  FLOAT   → 8 bytes (double)\n  BOOLEAN → 1 byte (0 or 1)\n  STRING  → 4 bytes (uint32_t length) + N bytes (character data)\n```",
+      "file": "src/object/object_manager.cpp",
+      "functions": [
+        {
+          "name": "SerializeRow(const Row& row, const Schema& schema) → vector<uint8_t>",
+          "description": "Iterate through `schema.GetColumns()` in order. For each column, look up the value in `row` by column name, write the type tag (the `DataType` enum cast to `uint8_t`), then write the value bytes according to the format above.",
+          "hints": [
+            "Use `reinterpret_cast<const uint8_t*>(&value)` to get raw bytes.",
+            "For STRING, write the 4-byte length first, then the character data.",
+            "Use `result.insert(result.end(), bytes, bytes + N)` to append bytes."
+          ],
+          "lines": 20
+        },
+        {
+          "name": "DeserializeRow(const vector<uint8_t>& data, const Schema& schema) → Row",
+          "description": "Reverse the serialization process. Read column by column in schema order, extracting the type tag and then the appropriately-sized data. Construct `Value` objects and insert them into the result `Row` map.",
+          "hints": [
+            "Track a `pos` index through the data buffer.",
+            "Read the type tag first (`data[pos++]`).",
+            "Use `memcpy` to read multi-byte values.",
+            "Always check bounds before reading (`pos + sizeof(T) <= data.size()`)."
+          ],
+          "lines": 20
+        }
+      ]
+    }
+  ],
+  "testing": {
+    "buildCommands": [
+      "cmake -B build",
+      "cmake --build build"
+    ],
+    "runCommand": "ctest --test-dir build --output-on-failure",
+    "testFile": "tests/proj2_object_test.cpp",
+    "breakdown": [
+      {
+        "suite": "Record CRUD",
+        "count": 6,
+        "covers": "Insert/get single & multiple, delete, page full, invalid slot"
+      },
+      {
+        "suite": "Serialization",
+        "count": 6,
+        "covers": "Integer, float, string, empty string, boolean, mixed types, roundtrip"
+      }
+    ],
+    "note": "Project #1 ships inside this download as a compiled reference library, so your buffer manager works correctly no matter how your own Project #1 went. Nothing to turn on — `cmake -B build` picks it up.",
+    "localTests": 29,
+    "platforms": "macOS or Linux, on either Intel or ARM. On Windows, build inside WSL: a native Windows toolchain is refused, because the reference libraries these downloads carry are built for macOS and Linux only."
+  },
+  "hints": [
+    "Draw the slotted page layout on paper and trace through an insertion step by step.",
+    "Remember: records grow downward (from DB_PAGE_SIZE toward 0), slots grow upward (from the header).",
+    "The free space is the gap between the last slot entry and the first record.",
+    "For serialization, use `schema.GetColumns()` to guarantee consistent column ordering.",
+    "Test serialization/deserialization independently before combining with InsertRecord/GetRecord.",
+    "Use the provided `ReadHeader`/`WriteHeader`/`ReadSlot`/`WriteSlot` helpers — don't manually compute byte offsets."
+  ],
+  "verification": {
+    "items": [
+      {
+        "kind": "invariant",
+        "name": "ObjectManager"
+      }
+    ]
+  },
+  "submission": {
+    "archive": "<student id>_proj2.zip",
+    "where": "Upload the archive to PLMS (https://plms.postech.ac.kr) under Project #2 before the deadline. Submissions sent by email, or left anywhere else, are not collected.",
+    "files": [
+      "src/object/object_manager.cpp"
+    ],
+    "extras": [
+      {
+        "name": "result.txt",
+        "description": "Output of `ctest --test-dir build --output-on-failure > result.txt 2>&1`"
+      },
+      {
+        "name": "REPORT.md",
+        "description": "Your report (see the sections below)"
+      }
+    ],
+    "note": "Keep the original directory layout inside the archive (src/…), so the files drop straight back into the project tree. Submit only the files you edited: no build/ directory, no compiled objects, no reference libraries.",
+    "report": [
+      {
+        "section": "Problem Analysis",
+        "weight": 20,
+        "description": "What each function you write has to solve, and what the given code it calls does for it. Only what your functions actually use — not every header in the download. The earlier projects are out of scope: they arrive as a compiled library."
+      },
+      {
+        "section": "Design",
+        "weight": 10,
+        "description": "The algorithm you chose for each function, and why that one."
+      },
+      {
+        "section": "Mapping",
+        "weight": 10,
+        "description": "Which part of the design is which part of your code, by file and line."
+      },
+      {
+        "section": "Verification",
+        "weight": 50,
+        "description": "The argument that your code is right.",
+        "parts": [
+          {
+            "weight": 25,
+            "listModules": true,
+            "blocks": [
+              {
+                "text": "**For each module below, write one expression that is always true of it** — true before any of its functions is called, and true again every time one of them returns. It may go false in the middle of a function; that is what makes it worth writing down."
+              },
+              {
+                "text": "The expression is symbols, not words:"
+              },
+              {
+                "code": [
+                  "gcd(num, den) = 1 and den > 0"
+                ]
+              },
+              {
+                "text": "If something is hard to put in symbols, define it as a variable in words, then use the variable in the expression:"
+              },
+              {
+                "code": [
+                  "P = the spaces with a car in them",
+                  "F = the spaces that are empty",
+                  "",
+                  "P union F = {0 .. total_spaces-1}",
+                  "|F| = free_count"
+                ]
+              },
+              {
+                "text": "You can use a loop:"
+              },
+              {
+                "code": [
+                  "for i in 0 .. total_spaces-1:  i in P or i in F"
+                ]
+              },
+              {
+                "text": "A module holds several such expressions true at once. Pick one and get it right; you do not have to find them all."
+              }
+            ]
+          },
+          {
+            "weight": 25,
+            "blocks": [
+              {
+                "text": "**For each function you wrote, show your expression is still true when it returns.** A line or two each, grouped by module."
+              },
+              {
+                "text": "If a function cannot affect the expression, say so in one line. If it could, say which step keeps it true."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "grading": {
+    "criteria": [
+      {
+        "item": "Report",
+        "weight": "90%",
+        "description": "Four sections, below: Problem Analysis 20%, Design 10%, Mapping 10%, Verification 50%. Its claims are checked against your code — an expression the report states and the code breaks is a failure of the report."
+      },
+      {
+        "item": "Code",
+        "weight": "10%",
+        "description": "Autograded on this project's own test suite."
+      }
+    ]
+  }
+}

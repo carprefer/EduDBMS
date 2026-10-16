@@ -1,0 +1,121 @@
+{
+  "code": "CSED357",
+  "title": "Database Systems",
+  "semester": "Fall 2026",
+  "university": "POSTECH",
+  "time": "Mon/Wed 11:00 AM – 12:15 PM",
+  "location": "Science BldgII[106]",
+  "textbook": "Database Management Systems, 3rd Edition (Ramakrishnan, Gehrke)",
+  "submitTo": {
+    "platform": "PLMS",
+    "url": "https://plms.postech.ac.kr"
+  },
+  "projectGrading": {
+    "split": [
+      {
+        "item": "Report",
+        "weight": 90,
+        "description": "{count} sections, below: {sections}. Its claims are checked against your code — an expression the report states and the code breaks is a failure of the report."
+      },
+      {
+        "item": "Code",
+        "weight": 10,
+        "description": "Autograded on this project's own test suite."
+      }
+    ],
+    "report": [
+      {
+        "section": "Problem Analysis",
+        "weight": 20,
+        "description": "What each function you write has to solve, and what the given code it calls does for it. Only what your functions actually use — not every header in the download. The earlier projects are out of scope: they arrive as a compiled library."
+      },
+      {
+        "section": "Design",
+        "weight": 10,
+        "description": "The algorithm you chose for each function, and why that one."
+      },
+      {
+        "section": "Mapping",
+        "weight": 10,
+        "description": "Which part of the design is which part of your code, by file and line."
+      },
+      {
+        "section": "Verification",
+        "weight": 50,
+        "description": "The argument that your code is right.",
+        "parts": [
+          {
+            "weight": 25,
+            "listModules": true,
+            "blocks": [
+              {
+                "text": "**For each module below, write one expression that is always true of it** — true before any of its functions is called, and true again every time one of them returns. It may go false in the middle of a function; that is what makes it worth writing down."
+              },
+              {
+                "text": "The expression is symbols, not words:"
+              },
+              {
+                "code": [
+                  "gcd(num, den) = 1 and den > 0"
+                ]
+              },
+              {
+                "text": "If something is hard to put in symbols, define it as a variable in words, then use the variable in the expression:"
+              },
+              {
+                "code": [
+                  "P = the spaces with a car in them",
+                  "F = the spaces that are empty",
+                  "",
+                  "P union F = {0 .. total_spaces-1}",
+                  "|F| = free_count"
+                ]
+              },
+              {
+                "text": "You can use a loop:"
+              },
+              {
+                "code": [
+                  "for i in 0 .. total_spaces-1:  i in P or i in F"
+                ]
+              },
+              {
+                "text": "A module holds several such expressions true at once. Pick one and get it right; you do not have to find them all."
+              }
+            ]
+          },
+          {
+            "weight": 25,
+            "blocks": [
+              {
+                "text": "**For each function you wrote, show your expression is still true when it returns.** A line or two each, grouped by module."
+              },
+              {
+                "text": "If a function cannot affect the expression, say so in one line. If it could, say which step keeps it true."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "description": "This course covers the fundamental concepts of database management systems. Students will learn relational data models, SQL, storage architecture, indexing (B+-Tree), buffer management, query processing and optimization, and transaction management. A major component of the course involves implementing core DBMS components in C++ through a series of progressive programming projects.",
+  "grading": [
+    {
+      "item": "Midterm Exam",
+      "weight": 30
+    },
+    {
+      "item": "Final Exam",
+      "weight": 30
+    },
+    {
+      "item": "Projects",
+      "weight": 35
+    },
+    {
+      "item": "Attendance / Participation",
+      "weight": 5
+    }
+  ]
+}

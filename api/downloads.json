@@ -1,0 +1,68 @@
+{
+  "starter": {
+    "refs": [],
+    "available": true
+  },
+  "proj1": {
+    "refs": [],
+    "available": true,
+    "releaseDate": "2026-09-16"
+  },
+  "proj2": {
+    "refs": [
+      "proj1"
+    ],
+    "available": true,
+    "releaseDate": "2026-09-25"
+  },
+  "proj3": {
+    "refs": [
+      "proj1",
+      "proj2"
+    ],
+    "available": true,
+    "releaseDate": "2026-10-04"
+  },
+  "proj4": {
+    "refs": [
+      "proj1",
+      "proj2",
+      "proj3"
+    ],
+    "available": true,
+    "releaseDate": "2026-10-16"
+  },
+  "proj5": {
+    "refs": [
+      "proj1",
+      "proj2",
+      "proj3",
+      "proj4"
+    ],
+    "available": false,
+    "releaseDate": "2026-11-12"
+  },
+  "proj6": {
+    "refs": [
+      "proj1",
+      "proj2",
+      "proj3",
+      "proj4",
+      "proj5"
+    ],
+    "available": false,
+    "releaseDate": "2026-11-26"
+  },
+  "proj7": {
+    "refs": [
+      "proj1",
+      "proj2",
+      "proj3",
+      "proj4",
+      "proj5",
+      "proj6"
+    ],
+    "available": false,
+    "releaseDate": "2026-12-12"
+  }
+}
