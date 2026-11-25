@@ -1,0 +1,18 @@
+{
+  "instructor": {
+    "name": "Wook-Shin Han",
+    "title": "Professor",
+    "office": "PIRL 402",
+    "officeHours": "Thu 2:00 – 3:00 PM",
+    "email": "wshan@postech.ac.kr",
+    "homepage": "https://wscrony.github.io/"
+  },
+  "tas": [
+    {
+      "name": "Sunho Cha",
+      "email": "carprefer@postech.ac.kr",
+      "officeHours": "Mondays, 21:00 – 22:00 (KST)",
+      "location": "Science BldgII[201]"
+    }
+  ]
+}
